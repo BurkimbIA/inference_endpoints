@@ -1,0 +1,94 @@
+# Docker
+.dockerignore
+**/Dockerfile*
+**/.dockerignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.staging
+.env.production
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Model cache and checkpoints
+cache/
+checkpoints/
+models/
+*.bin
+*.safetensors
+
+# Test results
+test-results-*.json
+coverage/
+.coverage
+.pytest_cache/
+
+# Deployment artifacts
+endpoint-*.json
+deployment-*.json
+
+# Secrets and keys
+*.key
+*.pem
+secrets.yaml
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Documentation build
+docs/_build/
+site/

@@ -1,0 +1,74 @@
+{
+  "mistral_endpoint": {
+    "name": "burkimbia-mistral-translation",
+    "image": "burkimbia/translation-models:latest",
+    "env": {
+      "HF_TOKEN": "${HF_TOKEN}"
+    },
+    "gpu_types": ["NVIDIA T4"],
+    "min_gpus": 1,
+    "max_gpus": 1,
+    "gpu_memory": "16GB",
+    "container_disk_size": "20GB",
+    "volume_mount_path": "/app/cache",
+    "volume_size": "10GB",
+    "idle_timeout": 300,
+    "scaling": {
+      "min_workers": 0,
+      "max_workers": 2,
+      "scale_up_threshold": 0.8,
+      "scale_down_threshold": 0.2
+    },
+    "network": {
+      "ports": [8000]
+    }
+  },
+  "nllb_endpoint": {
+    "name": "burkimbia-nllb-translation",
+    "image": "burkimbia/translation-models:latest",
+    "env": {
+      "HF_TOKEN": "${HF_TOKEN}"
+    },
+    "gpu_types": ["NVIDIA T4"],
+    "min_gpus": 1,
+    "max_gpus": 1,
+    "gpu_memory": "16GB",
+    "container_disk_size": "20GB",
+    "volume_mount_path": "/app/cache",
+    "volume_size": "10GB",
+    "idle_timeout": 300,
+    "scaling": {
+      "min_workers": 0,
+      "max_workers": 1,
+      "scale_up_threshold": 0.8,
+      "scale_down_threshold": 0.2
+    },
+    "network": {
+      "ports": [8000]
+    }
+  },
+  "unified_endpoint": {
+    "name": "burkimbia-unified-translation",
+    "image": "burkimbia/translation-models:latest",
+    "env": {
+      "HF_TOKEN": "${HF_TOKEN}"
+    },
+    "gpu_types": ["NVIDIA T4"],
+    "min_gpus": 1,
+    "max_gpus": 1,
+    "gpu_memory": "16GB",
+    "container_disk_size": "15GB",
+    "volume_mount_path": "/app/cache",
+    "volume_size": "8GB",
+    "idle_timeout": 300,
+    "scaling": {
+      "min_workers": 0,
+      "max_workers": 1,
+      "scale_up_threshold": 0.9,
+      "scale_down_threshold": 0.1
+    },
+    "network": {
+      "ports": [8000]
+    }
+  }
+}

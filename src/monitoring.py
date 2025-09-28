@@ -239,41 +239,46 @@ class HealthChecker:
             "details": {}
         }
         
-        disk = psutil.disk_usage('/')
+        disk = psutil.disk_usage("/")
         usage_percent = (disk.used / disk.total) * 100
         free_gb = disk.free / (1024**3)
-        
+
         checks["details"]["usage_percent"] = usage_percent
         checks["details"]["free_gb"] = free_gb
-        
+
         if usage_percent > 90 or free_gb < 2:
             checks["healthy"] = False
             checks["details"]["warning"] = "Low disk space"
-        
+
         return checks
+
 
 # Global instances
 performance_monitor = PerformanceMonitor()
 health_checker = None
+
 
 def initialize_monitoring(models: Dict[str, Any]):
     """Initialize monitoring with model references"""
     global health_checker
     health_checker = HealthChecker(models)
 
+
 def get_health_status() -> Dict[str, Any]:
     """Get current health status"""
     if health_checker is None:
         return {
             "status": "not_initialized",
-            "message": "Health checker not initialized"
+            "message": "Health checker not initialized",
         }
-    
+
     return health_checker.check_health()
+
 
 def get_performance_metrics() -> Dict[str, Any]:
     """Get current performance metrics"""
     return performance_monitor.get_metrics()
+
 
 def record_request_performance(duration: float, success: bool = True):
     """Record a request's performance for monitoring"""
