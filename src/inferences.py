@@ -149,5 +149,4 @@ class NLLBTranslator:
         if text.endswith('?') or text.endswith('!'):
             output += text[-1]  # Ajouter le dernier caractère  (soit "?" ou "!")
 
-
-        return output.capitalize(
+        return output.capitalize()

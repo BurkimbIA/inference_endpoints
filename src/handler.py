@@ -212,7 +212,6 @@ def handler(job):
 
 def health_check():
     """Health check endpoint to verify models are loaded"""
-    global mistral_model, nllb_model
     
     status = {
         "mistral_loaded": mistral_model is not None,
