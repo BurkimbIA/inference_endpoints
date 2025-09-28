@@ -1,5 +1,3 @@
-
-
 import os
 import re
 from peft import AutoPeftModelForCausalLM
@@ -10,18 +8,18 @@ class MistralTranslator:
     """
     Wrapper around a Mistral-Instruct-based model fine-tuned for French↔Mooré translation.
     """
+
     def __init__(self, model_id: str, hf_token_env: str = "HF_TOKEN"):
         hf_token = os.environ.get(hf_token_env)
         if hf_token is None:
-            raise ValueError(f"Please set the environment variable {hf_token_env} with your HuggingFace token.")
+            raise ValueError(
+                f"Please set the environment variable {hf_token_env} with your HuggingFace token."
+            )
         self.model = AutoPeftModelForCausalLM.from_pretrained(
-            model_id,
-            token=hf_token,
-            device_map="auto"
+            model_id, token=hf_token, device_map="auto"
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self.prompt_template = (
-            """
+        self.prompt_template = """
 <s>
 
 You are an expert Moore translator. Translate the provided {src_name} text to {tgt_name}.
@@ -34,25 +32,25 @@ Based on source language ({src_name}), provide the {tgt_name} text.
 
 ### {tgt_name}:
 """
-        )
 
     def translate(self, text: str, src_lang: str, tgt_lang: str) -> str:
         lang_map = {"fra_Latn": "French", "moor_Latn": "Moore"}
         src_name = lang_map.get(src_lang, src_lang)
         tgt_name = lang_map.get(tgt_lang, tgt_lang)
-        prompt = self.prompt_template.format(src_name=src_name, tgt_name=tgt_name, text=text)
+        prompt = self.prompt_template.format(
+            src_name=src_name, tgt_name=tgt_name, text=text
+        )
         inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
         outputs = self.model.generate(
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
             max_new_tokens=512,
-            do_sample=False
+            do_sample=False,
         )
         decoded = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         pattern = rf"### {tgt_name}:\s*(.+)"
         match = re.search(pattern, decoded, re.DOTALL)
         return match.group(1).strip() if match else decoded
-
 
 
 import re
@@ -66,13 +64,15 @@ from sacremoses import MosesPunctNormalizer
 from transformers import AutoModelForSeq2SeqLM, NllbTokenizer
 
 from huggingface_hub import login
-auth_token = os.getenv('HF_TOKEN')
+
+auth_token = os.getenv("HF_TOKEN")
 login(token=auth_token)
 
 MODELS_URLS = {
-            "V0.3(NLLB)": "burkimbia/BIA-NLLB-600M-david_5_epocks",
-            "V0.5(NLLB)": "burkimbia/BIA-NLLB-1.3B-david_7_epocks",
-        }
+    "V0.3(NLLB)": "burkimbia/BIA-NLLB-600M-david_5_epocks",
+    "V0.5(NLLB)": "burkimbia/BIA-NLLB-1.3B-david_7_epocks",
+}
+
 
 class TextPreprocessor:
     """
@@ -101,10 +101,10 @@ def fix_tokenizer(tokenizer, new_lang):
     - Initialise ou met à jour `lang_code_to_id` et `id_to_lang_code` en utilisant `getattr` pour éviter les vérifications répétitives.
     """
     if new_lang not in tokenizer.additional_special_tokens:
-        tokenizer.add_special_tokens({'additional_special_tokens': [new_lang]})
+        tokenizer.add_special_tokens({"additional_special_tokens": [new_lang]})
 
-    tokenizer.lang_code_to_id = getattr(tokenizer, 'lang_code_to_id', {})
-    tokenizer.id_to_lang_code = getattr(tokenizer, 'id_to_lang_code', {})
+    tokenizer.lang_code_to_id = getattr(tokenizer, "lang_code_to_id", {})
+    tokenizer.id_to_lang_code = getattr(tokenizer, "id_to_lang_code", {})
 
     if new_lang not in tokenizer.lang_code_to_id:
         new_lang_id = tokenizer.convert_tokens_to_ids(new_lang)
@@ -114,12 +114,13 @@ def fix_tokenizer(tokenizer, new_lang):
     return tokenizer
 
 
-
 class NLLBTranslator:
-    def __init__(self, model_name:str):
+    def __init__(self, model_name: str):
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(MODELS_URLS[model_name]).to(device)
+
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(MODELS_URLS[model_name]).to(
+            device
+        )
         if torch.cuda.is_available():
             self.model.cuda()
         self.tokenizer = NllbTokenizer.from_pretrained(MODELS_URLS[model_name])
@@ -127,12 +128,28 @@ class NLLBTranslator:
 
         self.preprocessor = TextPreprocessor()
 
-    def translate(self, text, src_lang='moor_Latn', tgt_lang='fr_Latn', a=32, b=3, max_input_length=1024, num_beams=5, **kwargs):
+    def translate(
+        self,
+        text,
+        src_lang="moor_Latn",
+        tgt_lang="fr_Latn",
+        a=32,
+        b=3,
+        max_input_length=1024,
+        num_beams=5,
+        **kwargs,
+    ):
         self.tokenizer.src_lang = src_lang
         self.tokenizer.tgt_lang = tgt_lang
         text_clean = self.preprocessor(text)
 
-        inputs = self.tokenizer(text_clean, return_tensors='pt', padding=True, truncation=True, max_length=max_input_length)
+        inputs = self.tokenizer(
+            text_clean,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=max_input_length,
+        )
 
         result = self.model.generate(
             **inputs.to(self.model.device),
@@ -143,10 +160,10 @@ class NLLBTranslator:
             repetition_penalty=1.2,
             length_penalty=1.0,
             early_stopping=True,
-            **kwargs
+            **kwargs,
         )
         output = self.tokenizer.batch_decode(result, skip_special_tokens=True)[0]
-        if text.endswith('?') or text.endswith('!'):
+        if text.endswith("?") or text.endswith("!"):
             output += text[-1]  # Ajouter le dernier caractère  (soit "?" ou "!")
 
         return output.capitalize()
