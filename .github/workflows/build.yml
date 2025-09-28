@@ -1,0 +1,210 @@
+name: BUILD - Docker Image
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to build'
+        required: false
+        default: 'latest'
+        type: string
+      push_image:
+        description: 'Push image to registry?'
+        required: false
+        default: true
+        type: boolean
+      test_build:
+        description: 'Run build tests?'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: burkimbia/translation-models
+
+jobs:
+  test:
+    name: Pre-Build Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_build != 'false'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install test dependencies
+      run: |
+        echo "Installing Python dependencies for testing..."
+        python -m pip install --upgrade pip
+        pip install pytest black flake8
+        
+        # Install minimal dependencies for testing (CPU versions)
+        echo "Installing CPU versions for testing..."
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        pip install transformers huggingface-hub
+        pip install loguru sacremoses sentencepiece
+    
+    - name: Lint with flake8
+      run: |
+        echo "Running flake8 linting..."
+        echo "Checking for critical errors..."
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        
+        echo "Running comprehensive linting..."
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Format check with black
+      run: |
+        echo "Checking code formatting with black..."
+        black --check --diff .
+    
+    - name: Run import tests
+      run: |
+        echo "Testing critical imports..."
+        python -c "
+        import sys
+        sys.path.append('src')
+        try:
+            from src.handler import validate_translation_input, health_check
+            print('Handler imports successful')
+        except Exception as e:
+            print(f'Handler import failed: {e}')
+            exit(1)
+        "
+        
+        python -c "
+        import sys
+        sys.path.append('src')
+        try:
+            from src.monitoring import PerformanceMonitor, HealthChecker
+            print('Monitoring imports successful')
+        except Exception as e:
+            print(f'Monitoring import failed: {e}')
+            exit(1)
+        "
+        
+        echo "All pre-build tests passed!"
+
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+      build-time: ${{ steps.timing.outputs.build-time }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Start build timer
+      id: start-time
+      run: echo "start-time=$(date +%s)" >> $GITHUB_OUTPUT
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: |
+          image=moby/buildkit:master
+    
+    - name: Log in to Docker Hub
+      if: github.event.inputs.push_image != 'false'
+      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=${{ github.event.inputs.image_tag || 'latest' }},enable={{is_default_branch}}
+          type=raw,value=run-${{ github.run_number }}
+          type=raw,value={{date 'YYYYMMDD-HHmmss'}}
+    
+    - name: Build Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64
+        push: ${{ github.event.inputs.push_image != 'false' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILDKIT_INLINE_CACHE=1
+    
+    - name: Calculate build time
+      id: timing
+      run: |
+        start_time=${{ steps.start-time.outputs.start-time }}
+        end_time=$(date +%s)
+        build_time=$((end_time - start_time))
+        echo "build-time=${build_time}" >> $GITHUB_OUTPUT
+        echo "Build completed in ${build_time} seconds"
+    
+    - name: Build summary
+      run: |
+        echo "## Build Results" >> $GITHUB_STEP_SUMMARY
+        echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Image Tags | \`${{ steps.meta.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Digest | \`${{ steps.build.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Build Time | ${{ steps.timing.outputs.build-time }} seconds |" >> $GITHUB_STEP_SUMMARY
+        echo "| Pushed | ${{ github.event.inputs.push_image != 'false' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Platform | linux/amd64 |" >> $GITHUB_STEP_SUMMARY
+        
+        echo "### Available Tags:"
+        echo "${{ steps.meta.outputs.tags }}" | while read tag; do
+          echo "- \`$tag\`" >> $GITHUB_STEP_SUMMARY
+        done
+    
+    - name: Build success notification
+      run: |
+        echo "BUILD SUCCESSFUL!"
+        echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+        echo "Tags: ${{ steps.meta.outputs.tags }}"
+        echo "Build time: ${{ steps.timing.outputs.build-time }} seconds"
+        echo "Digest: ${{ steps.build.outputs.digest }}"
+
+
+  cleanup:
+    name: Cleanup Old Images
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: needs.build.result == 'success' && github.event_name == 'push'
+    continue-on-error: true
+    
+    steps:
+    - name: Delete old container images
+      uses: actions/delete-package-versions@v4
+      with:
+        package-name: 'translation-models'
+        package-type: 'container'
+        min-versions-to-keep: 5
+        delete-only-untagged-versions: true

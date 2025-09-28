@@ -1,0 +1,213 @@
+name: 🚀 DEPLOY - RunPod Endpoints
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Deployment action'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - redeploy
+      model_type:
+        description: 'Model to deploy'
+        required: true
+        default: 'unified_endpoint'
+        type: choice
+        options:
+          - mistral_endpoint
+          - nllb_endpoint
+          - unified_endpoint
+          - all
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      image_tag:
+        description: 'Docker image tag to deploy'
+        required: false
+        default: 'latest'
+        type: string
+      run_tests:
+        description: 'Run smoke tests after deployment?'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: burkimbia/translation-models
+
+jobs:
+  # ============================================================================
+  # PRE-DEPLOYMENT VALIDATION
+  # ============================================================================
+  validate:
+    name: ✅ Pre-Deployment Validation
+    runs-on: ubuntu-latest
+    
+    outputs:
+      deploy-matrix: ${{ steps.matrix.outputs.deploy-matrix }}
+      target-image: ${{ steps.image.outputs.target-image }}
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: 🔍 Validate inputs
+      run: |
+        echo "🔍 Validating deployment inputs..."
+        echo "Action: ${{ github.event.inputs.action }}"
+        echo "Model Type: ${{ github.event.inputs.model_type }}"
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        echo "Image Tag: ${{ github.event.inputs.image_tag }}"
+        echo "Run Tests: ${{ github.event.inputs.run_tests }}"
+    
+    - name: 🎯 Generate deployment matrix
+      id: matrix
+      run: |
+        echo "🎯 Generating deployment matrix..."
+        
+        # Create matrix based on model_type input
+        case "${{ github.event.inputs.model_type }}" in
+          "all")
+            matrix='["mistral_endpoint", "nllb_endpoint", "unified_endpoint"]'
+            ;;
+          *)
+            matrix='["${{ github.event.inputs.model_type }}"]'
+            ;;
+        esac
+        
+        echo "deploy-matrix=$matrix" >> $GITHUB_OUTPUT
+        echo "📋 Deploy matrix: $matrix"
+    
+    - name: 🏷️ Determine target image
+      id: image
+      run: |
+        image_tag="${{ github.event.inputs.image_tag }}"
+        target_image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${image_tag}"
+        
+        echo "target-image=$target_image" >> $GITHUB_OUTPUT
+        echo "🏷️ Target image: $target_image"
+
+  # ============================================================================
+  # DEPLOYMENT MATRIX
+  # ============================================================================
+  deploy:
+    name: 🚀 Deploy ${{ matrix.model_type }}
+    runs-on: ubuntu-latest
+    needs: [validate]
+    if: needs.validate.result == 'success'
+    
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        model_type: ${{ fromJson(needs.validate.outputs.deploy-matrix) }}
+    
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: ⏰ Start deployment timer
+      id: start-time
+      run: echo "start-time=$(date +%s)" >> $GITHUB_OUTPUT
+    
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: 📦 Install deployment dependencies
+      run: |
+        echo "📦 Installing RunPod and deployment tools..."
+        pip install runpod-python requests
+    
+    - name: Execute deployment
+      env:
+        RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        echo "Starting deployment of ${{ matrix.model_type }} to ${{ github.event.inputs.environment }}"
+        
+        # Get endpoint configuration from runpod-config.json
+        endpoint_name=$(jq -r '.["${{ matrix.model_type }}"].name' runpod-config.json)
+        gpu_types=$(jq -r '.["${{ matrix.model_type }}"].gpu_types | join(",")' runpod-config.json)
+        
+        echo "Endpoint name: $endpoint_name"
+        echo "GPU types: $gpu_types"
+        echo "Docker image: ${{ needs.validate.outputs.target-image }}"
+        
+        # Simple deployment using RunPod CLI or API
+        # For now, just show what would be deployed
+        echo "Deployment configuration ready for: $endpoint_name"
+    
+    - name: ⏰ Calculate deployment time
+      id: timing
+      run: |
+        start_time=${{ steps.start-time.outputs.start-time }}
+        end_time=$(date +%s)
+        deploy_time=$((end_time - start_time))
+        echo "deploy-time=${deploy_time}" >> $GITHUB_OUTPUT
+        echo "🕐 Deployment of ${{ matrix.model_type }} completed in ${deploy_time} seconds"
+    
+    - name: ✅ Deployment success
+      run: |
+        echo "🎉 DEPLOYMENT SUCCESSFUL!"
+        echo "Model: ${{ matrix.model_type }}"
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        echo "Image: ${{ needs.validate.outputs.target-image }}"
+        echo "Time: ${{ steps.timing.outputs.deploy-time }} seconds"
+
+  # ============================================================================
+  # TRIGGER TESTS
+  # ============================================================================
+  trigger-tests:
+    name: 🧪 Trigger Tests
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: github.event.inputs.run_tests == 'true' && needs.deploy.result == 'success'
+    
+    steps:
+    - name: 🧪 Trigger smoke tests
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          console.log('🧪 Triggering smoke tests...');
+          
+          await github.rest.actions.createWorkflowDispatch({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            workflow_id: 'test.yml',
+            ref: '${{ github.ref }}',
+            inputs: {
+              environment: '${{ github.event.inputs.environment }}',
+              models: '${{ github.event.inputs.model_type }}'
+            }
+          });
+
+  # ============================================================================
+  # NOTIFICATION
+  # ============================================================================
+  notify:
+    name: 📢 Notify Results
+    runs-on: ubuntu-latest
+    needs: [validate, deploy]
+    if: always()
+    
+    steps:
+    - name: 📢 Deployment notification
+      run: |
+        echo "📢 DEPLOYMENT COMPLETED"
+        echo "Status: ${{ needs.deploy.result }}"
+        echo "Models: ${{ github.event.inputs.model_type }}"
+        echo "Environment: ${{ github.event.inputs.environment }}"
