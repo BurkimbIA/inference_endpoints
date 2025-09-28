@@ -88,7 +88,17 @@ jobs:
     
     - name: Log in to Docker Hub
       if: github.event.inputs.push_image != 'false'
-      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      run: |
+        if [ -z "${{ secrets.DOCKER_USERNAME }}" ] || [ -z "${{ secrets.DOCKER_PASSWORD }}" ]; then
+          echo "❌ Docker Hub secrets not configured!"
+          echo "Please set DOCKER_USERNAME and DOCKER_PASSWORD secrets in repository settings."
+          echo "Skipping Docker login - build will continue but image won't be pushed."
+          echo "push_enabled=false" >> $GITHUB_ENV
+        else
+          echo "🔐 Logging into Docker Hub..."
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+          echo "push_enabled=true" >> $GITHUB_ENV
+        fi
     
     - name: Extract metadata
       id: meta
@@ -109,7 +119,7 @@ jobs:
       with:
         context: .
         platforms: linux/amd64
-        push: ${{ github.event.inputs.push_image != 'false' }}
+        push: ${{ env.push_enabled == 'true' && github.event.inputs.push_image != 'false' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
