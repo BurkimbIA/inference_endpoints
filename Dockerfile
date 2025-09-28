@@ -1,19 +1,5 @@
 FROM pytorch/pytorch:2.2.1-cuda12.1-cudnn8-runtime
 
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-dev \
-    git \
-    wget \
-    curl \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN ln -s /usr/bin/python3 /usr/bin/python
-
 WORKDIR /app
 
 # Copy requirements first for better Docker layer caching
