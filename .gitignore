@@ -1,7 +1,5 @@
 # Docker
 .dockerignore
-**/Dockerfile*
-**/.dockerignore
 
 # Python
 __pycache__/
