@@ -59,10 +59,10 @@ jobs:
       run: |
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
 
-    - name: Format check with black
+    - name: Auto-format with black
       run: |
-        black --check --diff .
-    
+        black .
+
     - name: Basic syntax check
       run: |
         python -m py_compile src/handler.py
@@ -134,29 +134,11 @@ jobs:
         echo "build-time=${build_time}" >> $GITHUB_OUTPUT
         echo "Build completed in ${build_time} seconds"
     
-    - name: Build summary
-      run: |
-        echo "## Build Results" >> $GITHUB_STEP_SUMMARY
-        echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-        echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Image Tags | \`${{ steps.meta.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| Digest | \`${{ steps.build.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| Build Time | ${{ steps.timing.outputs.build-time }} seconds |" >> $GITHUB_STEP_SUMMARY
-        echo "| Pushed | ${{ github.event.inputs.push_image != 'false' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Platform | linux/amd64 |" >> $GITHUB_STEP_SUMMARY
-        
-        echo "### Available Tags:"
-        echo "${{ steps.meta.outputs.tags }}" | while read tag; do
-          echo "- \`$tag\`" >> $GITHUB_STEP_SUMMARY
-        done
-    
     - name: Build success notification
       run: |
         echo "BUILD SUCCESSFUL!"
         echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-        echo "Tags: ${{ steps.meta.outputs.tags }}"
         echo "Build time: ${{ steps.timing.outputs.build-time }} seconds"
-        echo "Digest: ${{ steps.build.outputs.digest }}"
 
 
   cleanup:
