@@ -14,7 +14,7 @@ on:
       - 'src/**'
       - 'requirements.txt'
       - 'Dockerfile'
-      - '.github/**
+      - '.github/**'
   workflow_dispatch:
     inputs:
       image_tag:
