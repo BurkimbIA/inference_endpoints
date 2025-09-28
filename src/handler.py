@@ -100,7 +100,6 @@ def validate_translation_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
 
 def translate_text(validated_input: Dict[str, Any]) -> str:
     """Perform translation using the specified model"""
-    global mistral_model, nllb_model
     
     text = validated_input["text"]
     model_type = validated_input["model_type"]
