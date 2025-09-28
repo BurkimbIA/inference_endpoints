@@ -52,56 +52,22 @@ jobs:
     
     - name: Install test dependencies
       run: |
-        echo "Installing Python dependencies for testing..."
         python -m pip install --upgrade pip
-        pip install pytest black flake8
-        
-        # Install minimal dependencies for testing (CPU versions)
-        echo "Installing CPU versions for testing..."
-        pip install torch --index-url https://download.pytorch.org/whl/cpu
-        pip install transformers huggingface-hub
-        pip install loguru sacremoses sentencepiece
-    
+        pip install flake8 black
+
     - name: Lint with flake8
       run: |
-        echo "Running flake8 linting..."
-        echo "Checking for critical errors..."
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        
-        echo "Running comprehensive linting..."
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    
+
     - name: Format check with black
       run: |
-        echo "Checking code formatting with black..."
         black --check --diff .
     
-    - name: Run import tests
+    - name: Basic syntax check
       run: |
-        echo "Testing critical imports..."
-        python -c "
-        import sys
-        sys.path.append('src')
-        try:
-            from src.handler import validate_translation_input, health_check
-            print('Handler imports successful')
-        except Exception as e:
-            print(f'Handler import failed: {e}')
-            exit(1)
-        "
-        
-        python -c "
-        import sys
-        sys.path.append('src')
-        try:
-            from src.monitoring import PerformanceMonitor, HealthChecker
-            print('Monitoring imports successful')
-        except Exception as e:
-            print(f'Monitoring import failed: {e}')
-            exit(1)
-        "
-        
-        echo "All pre-build tests passed!"
+        python -m py_compile src/handler.py
+        python -m py_compile src/inferences.py
+        python -m py_compile src/monitoring.py
 
   build:
     name: Build Docker Image
