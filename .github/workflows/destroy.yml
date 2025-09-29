@@ -141,8 +141,12 @@ jobs:
     
     - name: Install management tools
       run: |
-        echo "Installing RunPod management tools..."
-        pip install runpod-python requests
+        echo "Installing RunPod CLI and management tools..."
+        pip install runpod requests
+        
+        # Install RunPod CLI
+        curl -fsSL https://cli.runpod.io/install.sh | sh
+        export PATH="$PATH:$HOME/.runpod/bin"
     
     - name: Check endpoint existence
       id: check
@@ -153,29 +157,62 @@ jobs:
         
         # Get endpoint name from config
         endpoint_name=$(jq -r '.["${{ matrix.model_type }}"].name' runpod-config.json)
-        echo "Looking for endpoint: $endpoint_name"
+        full_endpoint_name="$endpoint_name-${{ matrix.environment }}"
+        echo "Looking for endpoint: $full_endpoint_name"
         
-        # For simplicity, assume endpoint exists (manual verification required)
-        echo "Endpoint '$endpoint_name' targeted for destruction"
-        echo "exists=true" >> $GITHUB_OUTPUT
-        echo "endpoint-name=$endpoint_name" >> $GITHUB_OUTPUT
+        # List all endpoints to find the one we want to destroy
+        endpoints_response=$(curl -s -X GET "https://api.runpod.ai/v2/endpoints" \
+          -H "Authorization: Bearer $RUNPOD_API_KEY")
+        
+        # Find endpoint by name
+        endpoint_id=$(echo "$endpoints_response" | jq -r --arg name "$full_endpoint_name" \
+          '.endpoints[]? | select(.name == $name) | .id // empty')
+        
+        if [ -n "$endpoint_id" ] && [ "$endpoint_id" != "null" ]; then
+          echo "✅ Found endpoint: $endpoint_id"
+          echo "exists=true" >> $GITHUB_OUTPUT
+          echo "endpoint-id=$endpoint_id" >> $GITHUB_OUTPUT
+          echo "endpoint-name=$full_endpoint_name" >> $GITHUB_OUTPUT
+        else
+          echo "ℹ️ Endpoint not found: $full_endpoint_name"
+          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "endpoint-name=$full_endpoint_name" >> $GITHUB_OUTPUT
+        fi
     
     - name: Execute destruction
       if: steps.check.outputs.exists == 'true'
       env:
         RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       run: |
-        echo "Destroying endpoint: ${{ steps.check.outputs.endpoint-name }}"
+        endpoint_id="${{ steps.check.outputs.endpoint-id }}"
+        endpoint_name="${{ steps.check.outputs.endpoint-name }}"
+        
+        echo "🔥 Destroying endpoint: $endpoint_name (ID: $endpoint_id)"
         echo "Environment: ${{ matrix.environment }}"
         
         if [ "${{ needs.validate.outputs.is-emergency }}" = "true" ]; then
-          echo "EMERGENCY DESTRUCTION MODE"
+          echo "🚨 EMERGENCY DESTRUCTION MODE"
         fi
         
-        # Manual destruction required
-        echo "Manual destruction required for: ${{ steps.check.outputs.endpoint-name }}"
-        echo "Please destroy endpoint manually in RunPod console"
-        echo "Destruction workflow completed"
+        # Delete the endpoint using RunPod API
+        response=$(curl -s -w "%{http_code}" -X DELETE \
+          "https://api.runpod.ai/v2/endpoints/$endpoint_id" \
+          -H "Authorization: Bearer $RUNPOD_API_KEY" \
+          -o delete_response.json)
+        
+        http_code=${response: -3}
+        delete_response=$(cat delete_response.json)
+        
+        if [ "$http_code" = "200" ] || [ "$http_code" = "204" ]; then
+          echo "✅ Endpoint destroyed successfully!"
+          echo "destroyed=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Failed to destroy endpoint"
+          echo "HTTP Code: $http_code"
+          echo "Response: $delete_response"
+          echo "destroyed=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
     
     - name: Calculate destruction time
       id: timing

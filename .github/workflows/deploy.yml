@@ -128,10 +128,15 @@ jobs:
     
     - name: Install deployment dependencies
       run: |
-        echo "Installing RunPod and deployment tools..."
+        echo "Installing RunPod CLI and deployment tools..."
         pip install runpod requests
+        
+        # Install RunPod CLI
+        curl -fsSL https://cli.runpod.io/install.sh | sh
+        export PATH="$PATH:$HOME/.runpod/bin"
     
     - name: Execute deployment
+      id: deploy
       env:
         RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -140,15 +145,68 @@ jobs:
         
         # Get endpoint configuration from runpod-config.json
         endpoint_name=$(jq -r '.["${{ matrix.model_type }}"].name' runpod-config.json)
-        gpu_types=$(jq -r '.["${{ matrix.model_type }}"].gpu_types | join(",")' runpod-config.json)
+        gpu_types=$(jq -r '.["${{ matrix.model_type }}"].gpu_types[0]' runpod-config.json)
+        gpu_memory=$(jq -r '.["${{ matrix.model_type }}"].gpu_memory' runpod-config.json)
+        container_disk_size=$(jq -r '.["${{ matrix.model_type }}"].container_disk_size' runpod-config.json)
+        min_workers=$(jq -r '.["${{ matrix.model_type }}"].scaling.min_workers' runpod-config.json)
+        max_workers=$(jq -r '.["${{ matrix.model_type }}"].scaling.max_workers' runpod-config.json)
+        idle_timeout=$(jq -r '.["${{ matrix.model_type }}"].idle_timeout' runpod-config.json)
         
-        echo "Endpoint name: $endpoint_name"
-        echo "GPU types: $gpu_types"
-        echo "Docker image: ${{ needs.validate.outputs.target-image }}"
+        echo "Configuration loaded:"
+        echo "  Endpoint name: $endpoint_name"
+        echo "  GPU type: $gpu_types"
+        echo "  Docker image: ${{ needs.validate.outputs.target-image }}"
+        echo "  Environment: ${{ github.event.inputs.environment }}"
         
-        # Simple deployment using RunPod CLI or API
-        # For now, just show what would be deployed
-        echo "Deployment configuration ready for: $endpoint_name"
+        # Create serverless endpoint using RunPod API
+        response=$(curl -s -w "%{http_code}" -X POST "https://api.runpod.ai/v2/endpoints" \
+          -H "Authorization: Bearer $RUNPOD_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"name\": \"$endpoint_name-${{ github.event.inputs.environment }}\",
+            \"template\": {
+              \"imageName\": \"${{ needs.validate.outputs.target-image }}\",
+              \"env\": {
+                \"HF_TOKEN\": \"$HF_TOKEN\"
+              },
+              \"containerDiskInGb\": $(echo $container_disk_size | sed 's/GB//'),
+              \"volumeInGb\": 8
+            },
+            \"idleTimeout\": $idle_timeout,
+            \"scaleSettings\": {
+              \"minWorkers\": $min_workers,
+              \"maxWorkers\": $max_workers,
+              \"queueLength\": 10
+            },
+            \"gpuTypes\": [\"$gpu_types\"]
+          }" -o response_body.json)
+        
+        http_code=${response: -3}
+        response_body=$(cat response_body.json)
+        
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+          endpoint_id=$(echo "$response_body" | jq -r '.id // .endpoint.id // "unknown"')
+          echo "✅ Deployment successful!"
+          echo "Endpoint ID: $endpoint_id"
+          echo "endpoint-id=$endpoint_id" >> $GITHUB_OUTPUT
+          
+          # Wait for endpoint to be ready (optional)
+          echo "Waiting for endpoint to be ready..."
+          sleep 30
+          
+          # Get endpoint status
+          status_response=$(curl -s -X GET "https://api.runpod.ai/v2/endpoints/$endpoint_id" \
+            -H "Authorization: Bearer $RUNPOD_API_KEY")
+          
+          endpoint_status=$(echo "$status_response" | jq -r '.status // "unknown"')
+          echo "Endpoint status: $endpoint_status"
+          
+        else
+          echo "❌ Deployment failed!"
+          echo "HTTP Code: $http_code"
+          echo "Response: $response_body"
+          exit 1
+        fi
     
     - name: Calculate deployment time
       id: timing
@@ -161,9 +219,52 @@ jobs:
     
     - name: Deployment success
       run: |
-        echo "DEPLOYMENT SUCCESSFUL!"
+        echo "🎉 DEPLOYMENT SUCCESSFUL!"
         echo "Model: ${{ matrix.model_type }}"
         echo "Environment: ${{ github.event.inputs.environment }}"
         echo "Image: ${{ needs.validate.outputs.target-image }}"
         echo "Time: ${{ steps.timing.outputs.deploy-time }} seconds"
+        
+        if [ -n "${{ steps.deploy.outputs.endpoint-id }}" ]; then
+          echo "Endpoint ID: ${{ steps.deploy.outputs.endpoint-id }}"
+          echo "Endpoint URL: https://api.runpod.ai/v2/${{ steps.deploy.outputs.endpoint-id }}/run"
+        fi
+    
+    - name: Test endpoint (optional)
+      if: steps.deploy.outputs.endpoint-id != ''
+      continue-on-error: true
+      env:
+        RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      run: |
+        endpoint_id="${{ steps.deploy.outputs.endpoint-id }}"
+        echo "🧪 Testing deployed endpoint..."
+        
+        # Wait a bit more for endpoint to be fully ready
+        sleep 60
+        
+        # Test with a simple translation
+        test_payload='{
+          "input": {
+            "text": "Hello world",
+            "model_type": "nllb",
+            "src_lang": "en_Latn",
+            "tgt_lang": "fr_Latn",
+            "max_tokens": 50
+          }
+        }'
+        
+        test_response=$(curl -s -X POST \
+          "https://api.runpod.ai/v2/$endpoint_id/run" \
+          -H "Authorization: Bearer $RUNPOD_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "$test_payload")
+        
+        echo "Test response: $test_response"
+        
+        # Check if translation was successful
+        if echo "$test_response" | jq -e '.status == "COMPLETED"' > /dev/null 2>&1; then
+          echo "✅ Endpoint is responding correctly!"
+        else
+          echo "⚠️ Endpoint might need more time to warm up"
+        fi
 
