@@ -141,12 +141,8 @@ jobs:
     
     - name: Install management tools
       run: |
-        echo "Installing RunPod CLI and management tools..."
-        pip install runpod requests
-        
-        # Install RunPod CLI
-        curl -fsSL https://cli.runpod.io/install.sh | sh
-        export PATH="$PATH:$HOME/.runpod/bin"
+        echo "Installing management tools..."
+        pip install requests jq
     
     - name: Check endpoint existence
       id: check

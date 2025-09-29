@@ -128,12 +128,8 @@ jobs:
     
     - name: Install deployment dependencies
       run: |
-        echo "Installing RunPod CLI and deployment tools..."
-        pip install runpod requests
-        
-        # Install RunPod CLI
-        curl -fsSL https://cli.runpod.io/install.sh | sh
-        export PATH="$PATH:$HOME/.runpod/bin"
+        echo "Installing deployment tools..."
+        pip install requests jq
     
     - name: Execute deployment
       id: deploy
