@@ -14,250 +14,170 @@ on:
           - unified_endpoint
           - all
           - emergency-all
-      environment:
-        description: 'Target environment'
-        required: true
-        default: 'staging'
-        type: choice
-        options:
-          - staging
-          - production
-          - all-environments
       confirm_destroy:
         description: 'Type "CONFIRM" to proceed with destruction'
         required: true
         type: string
 
-env:
-  REGISTRY: docker.io
-  IMAGE_NAME: burkimbia/translation-models
-
 jobs:
+  # ============================================================================
+  # VALIDATION
+  # ============================================================================
   validate:
     name: Validate Destruction Request
     runs-on: ubuntu-latest
-    
     outputs:
-      destroy-matrix: ${{ steps.matrix.outputs.destroy-matrix }}
-      environments: ${{ steps.envs.outputs.environments }}
-      is-emergency: ${{ steps.emergency.outputs.is-emergency }}
+      is-emergency: ${{ steps.check-emergency.outputs.is-emergency }}
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    
-    - name: Validate confirmation
-      run: |
-        if [ "${{ github.event.inputs.confirm_destroy }}" != "CONFIRM" ]; then
-          echo "Destruction not confirmed. You must type 'CONFIRM' to proceed."
-          echo "This is a safety measure to prevent accidental endpoint destruction."
-          exit 1
-        fi
-        echo "Destruction confirmed by user: ${{ github.actor }}"
-    
-    - name: Check for emergency destruction
-      id: emergency
-      run: |
-        if [ "${{ github.event.inputs.model_type }}" = "emergency-all" ]; then
-          echo "EMERGENCY DESTRUCTION REQUESTED"
-          echo "This will destroy ALL endpoints in ALL environments!"
-          echo "is-emergency=true" >> $GITHUB_OUTPUT
-        else
-          echo "is-emergency=false" >> $GITHUB_OUTPUT
-        fi
-    
-    - name: Generate destruction matrix
-      id: matrix
-      run: |
-        echo "Generating destruction matrix..."
-        
-        # Handle emergency destruction
-        if [ "${{ github.event.inputs.model_type }}" = "emergency-all" ]; then
-          matrix='["mistral_endpoint", "nllb_endpoint", "unified_endpoint"]'
-        elif [ "${{ github.event.inputs.model_type }}" = "all" ]; then
-          matrix='["mistral_endpoint", "nllb_endpoint", "unified_endpoint"]'
-        else
-          matrix='["${{ github.event.inputs.model_type }}"]'
-        fi
-        
-        echo "destroy-matrix=$matrix" >> $GITHUB_OUTPUT
-        echo "Destroy matrix: $matrix"
-    
-    - name: Generate environment matrix
-      id: envs
-      run: |
-        echo "Generating environment matrix..."
-        
-        if [ "${{ github.event.inputs.environment }}" = "all-environments" ] || [ "${{ github.event.inputs.model_type }}" = "emergency-all" ]; then
-          environments='["staging", "production"]'
-        else
-          environments='["${{ github.event.inputs.environment }}"]'
-        fi
-        
-        echo "environments=$environments" >> $GITHUB_OUTPUT
-        echo "Target environments: $environments"
-    
-    - name: Destruction summary
-      run: |
-        echo "## Destruction Plan" >> $GITHUB_STEP_SUMMARY
-        echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
-        echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Models | \`${{ github.event.inputs.model_type }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| Environments | \`${{ github.event.inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| Emergency | ${{ steps.emergency.outputs.is-emergency }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Requested by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Time | $(date -u +%Y-%m-%dT%H:%M:%SZ) |" >> $GITHUB_STEP_SUMMARY
+      - name: Validate confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "CONFIRM" ]; then
+            echo "❌ Destruction not confirmed. You must type 'CONFIRM' to proceed."
+            exit 1
+          fi
+          echo "✅ Destruction confirmed by user: ${{ github.actor }}"
+      
+      - name: Check for emergency mode
+        id: check-emergency
+        run: |
+          if [ "${{ github.event.inputs.model_type }}" = "emergency-all" ]; then
+            echo "is-emergency=true" >> $GITHUB_OUTPUT
+            echo "🚨 EMERGENCY DESTRUCTION MODE ACTIVATED"
+          else
+            echo "is-emergency=false" >> $GITHUB_OUTPUT
+          fi
 
   # ============================================================================
-  # DESTRUCTION MATRIX
+  # DESTROY ENDPOINTS
   # ============================================================================
   destroy:
-    name: Destroy ${{ matrix.model_type }} (${{ matrix.environment }})
+    name: Destroy ${{ matrix.model_type }}
     runs-on: ubuntu-latest
     needs: [validate]
-    if: needs.validate.result == 'success'
-    
     strategy:
       fail-fast: false
-      max-parallel: 6
       matrix:
-        model_type: ${{ fromJson(needs.validate.outputs.destroy-matrix) }}
-        environment: ${{ fromJson(needs.validate.outputs.environments) }}
-    
-    environment: ${{ matrix.environment }}
+        model_type: ${{ fromJson(format('["{0}"]', github.event.inputs.model_type)) }}
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    
-    - name: Start destruction timer
-      id: start-time
-      run: echo "start-time=$(date +%s)" >> $GITHUB_OUTPUT
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install management tools
-      run: |
-        echo "Installing management tools..."
-        pip install requests jq
-    
-    - name: Check endpoint existence
-      id: check
-      env:
-        RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      run: |
-        echo "Checking if endpoint exists..."
-        
-        # Get endpoint name from config
-        endpoint_name=$(jq -r '.["${{ matrix.model_type }}"].name' runpod-config.json)
-        full_endpoint_name="$endpoint_name-${{ matrix.environment }}"
-        echo "Looking for endpoint: $full_endpoint_name"
-        
-        # List all endpoints to find the one we want to destroy
-        endpoints_response=$(curl -s -X GET "https://api.runpod.ai/v2/endpoints" \
-          -H "Authorization: Bearer $RUNPOD_API_KEY")
-        
-        # Find endpoint by name
-        endpoint_id=$(echo "$endpoints_response" | jq -r --arg name "$full_endpoint_name" \
-          '.endpoints[]? | select(.name == $name) | .id // empty')
-        
-        if [ -n "$endpoint_id" ] && [ "$endpoint_id" != "null" ]; then
-          echo "✅ Found endpoint: $endpoint_id"
-          echo "exists=true" >> $GITHUB_OUTPUT
-          echo "endpoint-id=$endpoint_id" >> $GITHUB_OUTPUT
-          echo "endpoint-name=$full_endpoint_name" >> $GITHUB_OUTPUT
-        else
-          echo "ℹ️ Endpoint not found: $full_endpoint_name"
-          echo "exists=false" >> $GITHUB_OUTPUT
-          echo "endpoint-name=$full_endpoint_name" >> $GITHUB_OUTPUT
-        fi
-    
-    - name: Execute destruction
-      if: steps.check.outputs.exists == 'true'
-      env:
-        RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      run: |
-        endpoint_id="${{ steps.check.outputs.endpoint-id }}"
-        endpoint_name="${{ steps.check.outputs.endpoint-name }}"
-        
-        echo "🔥 Destroying endpoint: $endpoint_name (ID: $endpoint_id)"
-        echo "Environment: ${{ matrix.environment }}"
-        
-        if [ "${{ needs.validate.outputs.is-emergency }}" = "true" ]; then
-          echo "🚨 EMERGENCY DESTRUCTION MODE"
-        fi
-        
-        # Delete the endpoint using RunPod API
-        response=$(curl -s -w "%{http_code}" -X DELETE \
-          "https://api.runpod.ai/v2/endpoints/$endpoint_id" \
-          -H "Authorization: Bearer $RUNPOD_API_KEY" \
-          -o delete_response.json)
-        
-        http_code=${response: -3}
-        delete_response=$(cat delete_response.json)
-        
-        if [ "$http_code" = "200" ] || [ "$http_code" = "204" ]; then
-          echo "✅ Endpoint destroyed successfully!"
-          echo "destroyed=true" >> $GITHUB_OUTPUT
-        else
-          echo "❌ Failed to destroy endpoint"
-          echo "HTTP Code: $http_code"
-          echo "Response: $delete_response"
-          echo "destroyed=false" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-    
-    - name: Calculate destruction time
-      id: timing
-      run: |
-        start_time=${{ steps.start-time.outputs.start-time }}
-        end_time=$(date +%s)
-        destroy_time=$((end_time - start_time))
-        echo "destroy-time=${destroy_time}" >> $GITHUB_OUTPUT
-        echo "Destruction of ${{ matrix.model_type }} completed in ${destroy_time} seconds"
-    
-    - name: Log destruction
-      run: |
-        # Create destruction log
-        cat > destruction-${{ matrix.model_type }}-${{ matrix.environment }}.json << EOF
-        {
-          "model_type": "${{ matrix.model_type }}",
-          "environment": "${{ matrix.environment }}",
-          "endpoint_name": "${{ steps.check.outputs.endpoint-name }}",
-          "existed": ${{ steps.check.outputs.exists }},
-          "destruction_time": "${{ steps.timing.outputs.destroy-time }}",
-          "destroyed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-          "destroyed_by": "${{ github.actor }}",
-          "workflow_run": "${{ github.run_id }}",
-          "git_sha": "${{ github.sha }}",
-          "is_emergency": ${{ needs.validate.outputs.is-emergency }}
-        }
-        EOF
-        
-        echo "Destruction logged"
-    
-    - name: Upload destruction logs
-      uses: actions/upload-artifact@v3
-      with:
-        name: destruction-logs-${{ matrix.model_type }}-${{ matrix.environment }}
-        path: destruction-${{ matrix.model_type }}-${{ matrix.environment }}.json
-        retention-days: 90
-    
-    - name: Destruction complete
-      run: |
-        if [ "${{ steps.check.outputs.exists }}" = "true" ]; then
-          echo "DESTRUCTION SUCCESSFUL!"
-          echo "Endpoint: ${{ steps.check.outputs.endpoint-name }}"
-          echo "Environment: ${{ matrix.environment }}"
-          echo "Time: ${{ steps.timing.outputs.destroy-time }} seconds"
-          echo "This endpoint is no longer incurring costs"
-        else
-          echo "Endpoint was already destroyed or didn't exist"
-          echo "No costs were being incurred"
-        fi
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Record start time
+        id: start-time
+        run: echo "start-time=$(date +%s)" >> $GITHUB_OUTPUT
+      
+      - name: Check endpoint existence
+        id: check
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+        run: |
+          echo "Checking if endpoint exists..."
+          
+          # Get endpoint name from config
+          endpoint_name=$(jq -r '.["${{ matrix.model_type }}"].endpoint_name' runpod-config.json)
+          echo "Looking for endpoint: $endpoint_name"
+          
+          # List all endpoints to find the one we want to destroy
+          endpoints_response=$(curl -s -X GET "https://rest.runpod.io/v1/endpoints" \
+            -H "Authorization: Bearer $RUNPOD_API_KEY")
+          
+          # Find endpoint by name
+          endpoint_id=$(echo "$endpoints_response" | jq -r --arg name "$endpoint_name" \
+            '.[]? | select(.name == $name) | .id // empty')
+          
+          if [ -n "$endpoint_id" ] && [ "$endpoint_id" != "null" ]; then
+            echo "✅ Found endpoint: $endpoint_id"
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "endpoint-id=$endpoint_id" >> $GITHUB_OUTPUT
+            echo "endpoint-name=$endpoint_name" >> $GITHUB_OUTPUT
+          else
+            echo "ℹ️ Endpoint not found: $endpoint_name"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "endpoint-name=$endpoint_name" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Execute destruction
+        if: steps.check.outputs.exists == 'true'
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+        run: |
+          endpoint_id="${{ steps.check.outputs.endpoint-id }}"
+          endpoint_name="${{ steps.check.outputs.endpoint-name }}"
+          
+          echo "🔥 Destroying endpoint: $endpoint_name (ID: $endpoint_id)"
+          
+          if [ "${{ needs.validate.outputs.is-emergency }}" = "true" ]; then
+            echo "🚨 EMERGENCY DESTRUCTION MODE"
+          fi
+          
+          # Delete the endpoint using RunPod API
+          response=$(curl -s -w "%{http_code}" -X DELETE \
+            "https://rest.runpod.io/v1/endpoints/$endpoint_id" \
+            -H "Authorization: Bearer $RUNPOD_API_KEY" \
+            -o delete_response.json)
+          
+          http_code=${response: -3}
+          delete_response=$(cat delete_response.json)
+          
+          if [ "$http_code" = "200" ] || [ "$http_code" = "204" ]; then
+            echo "✅ Endpoint destroyed successfully!"
+            echo "destroyed=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to destroy endpoint"
+            echo "HTTP Code: $http_code"
+            echo "Response: $delete_response"
+            echo "destroyed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+      
+      - name: Calculate destruction time
+        id: timing
+        run: |
+          start_time=${{ steps.start-time.outputs.start-time }}
+          end_time=$(date +%s)
+          destroy_time=$((end_time - start_time))
+          echo "destroy-time=${destroy_time}" >> $GITHUB_OUTPUT
+          echo "Destruction of ${{ matrix.model_type }} completed in ${destroy_time} seconds"
+      
+      - name: Log destruction
+        run: |
+          # Create destruction log
+          cat > destruction-${{ matrix.model_type }}.json << EOF
+          {
+            "model_type": "${{ matrix.model_type }}",
+            "endpoint_name": "${{ steps.check.outputs.endpoint-name }}",
+            "existed": ${{ steps.check.outputs.exists }},
+            "destruction_time": "${{ steps.timing.outputs.destroy-time }}",
+            "destroyed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "destroyed_by": "${{ github.actor }}",
+            "workflow_run": "${{ github.run_id }}",
+            "git_sha": "${{ github.sha }}",
+            "is_emergency": ${{ needs.validate.outputs.is-emergency }}
+          }
+          EOF
+          
+          echo "Destruction logged"
+      
+      - name: Upload destruction logs
+        uses: actions/upload-artifact@v3
+        with:
+          name: destruction-logs-${{ matrix.model_type }}
+          path: destruction-${{ matrix.model_type }}.json
+          retention-days: 90
+      
+      - name: Destruction complete
+        run: |
+          if [ "${{ steps.check.outputs.exists }}" = "true" ]; then
+            echo "✅ DESTRUCTION SUCCESSFUL!"
+            echo "Endpoint: ${{ steps.check.outputs.endpoint-name }}"
+            echo "Time: ${{ steps.timing.outputs.destroy-time }} seconds"
+            echo "This endpoint is no longer incurring costs"
+          else
+            echo "ℹ️ Endpoint was already destroyed or didn't exist"
+            echo "No costs were being incurred"
+          fi
 
   # ============================================================================
   # DESTRUCTION SUMMARY
@@ -269,123 +189,52 @@ jobs:
     if: always() && needs.validate.result == 'success'
     
     steps:
-    - name: Download destruction logs
-      uses: actions/download-artifact@v3
-      with:
-        path: destruction-logs
-    
-    - name: Generate summary report
-      run: |
-        echo "## Destruction Summary Report" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [ "${{ needs.validate.outputs.is-emergency }}" = "true" ]; then
-          echo "### EMERGENCY DESTRUCTION COMPLETED" >> $GITHUB_STEP_SUMMARY
+      - name: Download destruction logs
+        uses: actions/download-artifact@v3
+        with:
+          path: destruction-logs
+      
+      - name: Generate summary report
+        run: |
+          echo "## Destruction Summary Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        echo "| Model | Environment | Status | Time | Costs Stopped |" >> $GITHUB_STEP_SUMMARY
-        echo "|-------|-------------|--------|------|---------------|" >> $GITHUB_STEP_SUMMARY
-        
-        # Process destruction logs
-        total_savings=0
-        for log_dir in destruction-logs/*/; do
-          if [ -d "$log_dir" ]; then
-            for json_file in "$log_dir"*.json; do
-              if [ -f "$json_file" ]; then
-                model_type=$(jq -r '.model_type' "$json_file")
-                environment=$(jq -r '.environment' "$json_file")
-                existed=$(jq -r '.existed' "$json_file")
-                destroy_time=$(jq -r '.destruction_time' "$json_file")
-                
-                # Calculate cost savings (T4 GPU = $0.50/hour)
-                cost_per_hour="0.50"
-                
-                if [ "$existed" = "true" ]; then
-                  status="Destroyed"
-                  cost_status="\$${cost_per_hour}/hour"
-                  total_savings=$(echo "$total_savings + $cost_per_hour" | bc -l 2>/dev/null || echo "0.50")
-                else
-                  status="Not Found"
-                  cost_status="\$0.00/hour"
-                fi
-                
-                echo "| $model_type | $environment | $status | ${destroy_time}s | $cost_status |" >> $GITHUB_STEP_SUMMARY
-              fi
-            done
+          
+          if [ "${{ needs.validate.outputs.is-emergency }}" = "true" ]; then
+            echo "### 🚨 EMERGENCY DESTRUCTION COMPLETED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
           fi
-        done
-        
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Cost Impact" >> $GITHUB_STEP_SUMMARY
-        echo "- **Hourly savings**: Up to \$${total_savings:-0.50}/hour" >> $GITHUB_STEP_SUMMARY
-        echo "- **Daily savings**: Up to \$$(echo "scale=2; ${total_savings:-0.50} * 24" | bc -l 2>/dev/null || echo "12.00")/day" >> $GITHUB_STEP_SUMMARY
-        echo "- **Monthly savings**: Up to \$$(echo "scale=2; ${total_savings:-0.50} * 24 * 30" | bc -l 2>/dev/null || echo "360.00")/month" >> $GITHUB_STEP_SUMMARY
-        
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Destruction Details" >> $GITHUB_STEP_SUMMARY
-        echo "- **Requested by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Workflow run**: [\#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
-        echo "- **Timestamp**: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
-
-  # ============================================================================
-  # FINAL COST CHECK
-  # ============================================================================
-  cost-check:
-    name: Final Cost Check
-    runs-on: ubuntu-latest
-    needs: [destroy]
-    if: needs.destroy.result == 'success'
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install cost checking tools
-      run: |
-        pip install runpod-python
-    
-    - name: Check remaining costs
-      env:
-        RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      run: |
-        echo "Checking remaining endpoint costs..."
-        
-        if [ -n "$RUNPOD_API_KEY" ]; then
-          echo "Manual cost verification required in RunPod console"
-          echo "Check your RunPod dashboard for current spending"
-        fi
-        
-        echo "If you see $0.00/hour total costs, destruction was successful!"
-
-  # ============================================================================
-  # NOTIFICATION
-  # ============================================================================
-  notify:
-    name: Notify Destruction
-    runs-on: ubuntu-latest
-    needs: [validate, destroy, summary]
-    if: always()
-    
-    steps:
-    - name: Destruction notification
-      run: |
-        echo "DESTRUCTION COMPLETED"
-        echo "Status: ${{ needs.destroy.result }}"
-        echo "Models: ${{ github.event.inputs.model_type }}"
-        echo "Environment: ${{ github.event.inputs.environment }}"
-        echo "Emergency: ${{ needs.validate.outputs.is-emergency }}"
-        echo "Requested by: ${{ github.actor }}"
-        
-        if [ "${{ needs.destroy.result }}" = "success" ]; then
-          echo "All targeted endpoints have been destroyed"
-          echo "Costs have been reduced or eliminated"
-        else
-          echo "Some destructions may have failed"
-          echo "Check the workflow logs for details"
-        fi
+          
+          echo "| Model | Status | Time | Costs Stopped |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|------|---------------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Process destruction logs
+          total_savings=0
+          for json_file in destruction-logs/*/*.json; do
+            if [ -f "$json_file" ]; then
+              model_type=$(jq -r '.model_type' "$json_file")
+              existed=$(jq -r '.existed' "$json_file")
+              destroy_time=$(jq -r '.destruction_time' "$json_file")
+              cost_per_hour="0.50"
+              
+              if [ "$existed" = "true" ]; then
+                status="✅ Destroyed"
+                cost_status="\$${cost_per_hour}/hour"
+                total_savings=$(echo "$total_savings + $cost_per_hour" | bc -l 2>/dev/null || echo "0.50")
+              else
+                status="ℹ️ Not Found"
+                cost_status="\$0.00/hour"
+              fi
+              
+              echo "| $model_type | $status | ${destroy_time}s | $cost_status |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 💰 Cost Impact" >> $GITHUB_STEP_SUMMARY
+          echo "- **Hourly savings**: Up to \$${total_savings:-0.50}/hour" >> $GITHUB_STEP_SUMMARY
+          echo "- **Daily savings**: Up to \$$(echo "scale=2; ${total_savings:-0.50} * 24" | bc -l 2>/dev/null || echo "12.00")/day" >> $GITHUB_STEP_SUMMARY
+          echo "- **Monthly savings**: Up to \$$(echo "scale=2; ${total_savings:-0.50} * 24 * 30" | bc -l 2>/dev/null || echo "360.00")/month" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Destruction Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Requested by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

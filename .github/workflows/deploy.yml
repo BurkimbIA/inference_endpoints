@@ -3,14 +3,6 @@ name: DEPLOY - RunPod Endpoints
 on:
   workflow_dispatch:
     inputs:
-      action:
-        description: 'Deployment action'
-        required: true
-        default: 'deploy'
-        type: choice
-        options:
-          - deploy
-          - redeploy
       model_type:
         description: 'Model to deploy'
         required: true
@@ -20,247 +12,96 @@ on:
           - mistral_endpoint
           - nllb_endpoint
           - unified_endpoint
-          - all
-      environment:
-        description: 'Target environment'
-        required: true
-        default: 'staging'
-        type: choice
-        options:
-          - staging
-          - production
       image_tag:
-        description: 'Docker image tag to deploy'
+        description: 'Docker image tag'
         required: false
         default: 'latest'
         type: string
-      run_tests:
-        description: 'Run smoke tests after deployment?'
-        required: false
-        default: true
-        type: boolean
 
 env:
-  REGISTRY: docker.io
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/translation-models
 
 jobs:
-  # ============================================================================
-  # PRE-DEPLOYMENT VALIDATION
-  # ============================================================================
-  validate:
-    name: Pre-Deployment Validation
-    runs-on: ubuntu-latest
-    
-    outputs:
-      deploy-matrix: ${{ steps.matrix.outputs.deploy-matrix }}
-      target-image: ${{ steps.image.outputs.target-image }}
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    
-    - name: Validate inputs
-      run: |
-        echo "Validating deployment inputs..."
-        echo "Action: ${{ github.event.inputs.action }}"
-        echo "Model Type: ${{ github.event.inputs.model_type }}"
-        echo "Environment: ${{ github.event.inputs.environment }}"
-        echo "Image Tag: ${{ github.event.inputs.image_tag }}"
-        echo "Run Tests: ${{ github.event.inputs.run_tests }}"
-    
-    - name: Generate deployment matrix
-      id: matrix
-      run: |
-        echo "Generating deployment matrix..."
-        
-        # Create matrix based on model_type input
-        case "${{ github.event.inputs.model_type }}" in
-          "all")
-            matrix='["mistral_endpoint", "nllb_endpoint", "unified_endpoint"]'
-            ;;
-          *)
-            matrix='["${{ github.event.inputs.model_type }}"]'
-            ;;
-        esac
-        
-        echo "deploy-matrix=$matrix" >> $GITHUB_OUTPUT
-        echo "Deploy matrix: $matrix"
-    
-    - name: Determine target image
-      id: image
-      run: |
-        image_tag="${{ github.event.inputs.image_tag }}"
-        target_image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${image_tag}"
-        
-        echo "target-image=$target_image" >> $GITHUB_OUTPUT
-        echo "Target image: $target_image"
-
-  # ============================================================================
-  # DEPLOYMENT MATRIX
-  # ============================================================================
   deploy:
     name: Deploy ${{ matrix.model_type }}
     runs-on: ubuntu-latest
-    needs: [validate]
-    if: needs.validate.result == 'success'
     
     strategy:
       fail-fast: false
-      max-parallel: 3
       matrix:
-        model_type: ${{ fromJson(needs.validate.outputs.deploy-matrix) }}
-    
-    environment: ${{ github.event.inputs.environment }}
+        model_type: ${{ fromJson(format('["{0}"]', github.event.inputs.model_type)) }}
     
     steps:
-    - name: Checkout repository
+    - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Start deployment timer
-      id: start-time
-      run: echo "start-time=$(date +%s)" >> $GITHUB_OUTPUT
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install deployment dependencies
-      run: |
-        echo "Installing deployment tools..."
-        pip install requests jq
-    
-    - name: Execute deployment
-      id: deploy
+    - name: Deploy to RunPod
       env:
         RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
-        echo "Starting deployment of ${{ matrix.model_type }} to ${{ github.event.inputs.environment }}"
-        
-        # Get endpoint configuration from runpod-config.json
-        endpoint_name=$(jq -r '.["${{ matrix.model_type }}"].name' runpod-config.json)
+        # Load config
+        endpoint_name=$(jq -r '.["${{ matrix.model_type }}"].endpoint_name' runpod-config.json)
+        model_type=$(jq -r '.["${{ matrix.model_type }}"].model_type' runpod-config.json)
         gpu_types=$(jq -r '.["${{ matrix.model_type }}"].gpu_types[0]' runpod-config.json)
-        gpu_memory=$(jq -r '.["${{ matrix.model_type }}"].gpu_memory' runpod-config.json)
-        container_disk_size=$(jq -r '.["${{ matrix.model_type }}"].container_disk_size' runpod-config.json)
+        container_disk_size=$(jq -r '.template_config.container_disk_size' runpod-config.json)
+        volume_size=$(jq -r '.template_config.volume_size' runpod-config.json)
         min_workers=$(jq -r '.["${{ matrix.model_type }}"].scaling.min_workers' runpod-config.json)
         max_workers=$(jq -r '.["${{ matrix.model_type }}"].scaling.max_workers' runpod-config.json)
         idle_timeout=$(jq -r '.["${{ matrix.model_type }}"].idle_timeout' runpod-config.json)
         
-        echo "Configuration loaded:"
-        echo "  Endpoint name: $endpoint_name"
-        echo "  GPU type: $gpu_types"
-        echo "  Docker image: ${{ needs.validate.outputs.target-image }}"
-        echo "  Environment: ${{ github.event.inputs.environment }}"
+        template_name="burkimbia-translation-$model_type-template"
+        target_image="${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}"
         
-        # Create serverless endpoint using RunPod API
-        response=$(curl -s -w "%{http_code}" -X POST "https://api.runpod.ai/v2/endpoints" \
+        echo "Deploying $endpoint_name (model: $model_type)"
+        
+        # Check/Create template
+        existing_templates=$(curl -s -H "Authorization: Bearer $RUNPOD_API_KEY" "https://rest.runpod.io/v1/templates")
+        template_id=$(echo "$existing_templates" | jq -r --arg name "$template_name" '.[] | select(.name == $name) | .id')
+        
+        if [ -z "$template_id" ] || [ "$template_id" = "null" ]; then
+          echo "Creating template: $template_name"
+          template_response=$(curl -s -X POST "https://rest.runpod.io/v1/templates" \
+            -H "Authorization: Bearer $RUNPOD_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"name\": \"$template_name\",
+              \"imageName\": \"$target_image\",
+              \"isServerless\": true,
+              \"containerDiskInGb\": $(echo $container_disk_size | sed 's/GB//'),
+              \"volumeInGb\": $(echo $volume_size | sed 's/GB//'),
+              \"env\": {
+                \"HF_TOKEN\": \"$HF_TOKEN\",
+                \"MODEL_TYPE\": \"$model_type\"
+              }
+            }")
+          template_id=$(echo "$template_response" | jq -r '.id')
+          echo "✅ Template created: $template_id"
+        else
+          echo "✅ Template exists: $template_id"
+        fi
+        
+        # Create endpoint
+        echo "Creating endpoint..."
+        endpoint_response=$(curl -s -X POST "https://rest.runpod.io/v1/endpoints" \
           -H "Authorization: Bearer $RUNPOD_API_KEY" \
           -H "Content-Type: application/json" \
           -d "{
-            \"name\": \"$endpoint_name-${{ github.event.inputs.environment }}\",
-            \"template\": {
-              \"imageName\": \"${{ needs.validate.outputs.target-image }}\",
-              \"env\": {
-                \"HF_TOKEN\": \"$HF_TOKEN\"
-              },
-              \"containerDiskInGb\": $(echo $container_disk_size | sed 's/GB//'),
-              \"volumeInGb\": 8
-            },
+            \"name\": \"$endpoint_name\",
+            \"templateId\": \"$template_id\",
+            \"gpuTypeIds\": [\"$gpu_types\"],
             \"idleTimeout\": $idle_timeout,
-            \"scaleSettings\": {
-              \"minWorkers\": $min_workers,
-              \"maxWorkers\": $max_workers,
-              \"queueLength\": 10
-            },
-            \"gpuTypes\": [\"$gpu_types\"]
-          }" -o response_body.json)
+            \"workersMin\": $min_workers,
+            \"workersMax\": $max_workers
+          }")
         
-        http_code=${response: -3}
-        response_body=$(cat response_body.json)
+        endpoint_id=$(echo "$endpoint_response" | jq -r '.id')
         
-        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
-          endpoint_id=$(echo "$response_body" | jq -r '.id // .endpoint.id // "unknown"')
-          echo "✅ Deployment successful!"
-          echo "Endpoint ID: $endpoint_id"
-          echo "endpoint-id=$endpoint_id" >> $GITHUB_OUTPUT
-          
-          # Wait for endpoint to be ready (optional)
-          echo "Waiting for endpoint to be ready..."
-          sleep 30
-          
-          # Get endpoint status
-          status_response=$(curl -s -X GET "https://api.runpod.ai/v2/endpoints/$endpoint_id" \
-            -H "Authorization: Bearer $RUNPOD_API_KEY")
-          
-          endpoint_status=$(echo "$status_response" | jq -r '.status // "unknown"')
-          echo "Endpoint status: $endpoint_status"
-          
+        if [ -n "$endpoint_id" ] && [ "$endpoint_id" != "null" ]; then
+          echo "✅ Endpoint deployed: $endpoint_id"
+          echo "🌐 URL: https://api.runpod.ai/v2/$endpoint_id/run"
         else
-          echo "❌ Deployment failed!"
-          echo "HTTP Code: $http_code"
-          echo "Response: $response_body"
+          echo "❌ Deploy failed: $endpoint_response"
           exit 1
-        fi
-    
-    - name: Calculate deployment time
-      id: timing
-      run: |
-        start_time=${{ steps.start-time.outputs.start-time }}
-        end_time=$(date +%s)
-        deploy_time=$((end_time - start_time))
-        echo "deploy-time=${deploy_time}" >> $GITHUB_OUTPUT
-        echo "Deployment of ${{ matrix.model_type }} completed in ${deploy_time} seconds"
-    
-    - name: Deployment success
-      run: |
-        echo "🎉 DEPLOYMENT SUCCESSFUL!"
-        echo "Model: ${{ matrix.model_type }}"
-        echo "Environment: ${{ github.event.inputs.environment }}"
-        echo "Image: ${{ needs.validate.outputs.target-image }}"
-        echo "Time: ${{ steps.timing.outputs.deploy-time }} seconds"
-        
-        if [ -n "${{ steps.deploy.outputs.endpoint-id }}" ]; then
-          echo "Endpoint ID: ${{ steps.deploy.outputs.endpoint-id }}"
-          echo "Endpoint URL: https://api.runpod.ai/v2/${{ steps.deploy.outputs.endpoint-id }}/run"
-        fi
-    
-    - name: Test endpoint (optional)
-      if: steps.deploy.outputs.endpoint-id != ''
-      continue-on-error: true
-      env:
-        RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      run: |
-        endpoint_id="${{ steps.deploy.outputs.endpoint-id }}"
-        echo "🧪 Testing deployed endpoint..."
-        
-        # Wait a bit more for endpoint to be fully ready
-        sleep 60
-        
-        # Test with a simple translation
-        test_payload='{
-          "input": {
-            "text": "Hello world",
-            "model_type": "nllb",
-            "src_lang": "en_Latn",
-            "tgt_lang": "fr_Latn",
-            "max_tokens": 50
-          }
-        }'
-        
-        test_response=$(curl -s -X POST \
-          "https://api.runpod.ai/v2/$endpoint_id/run" \
-          -H "Authorization: Bearer $RUNPOD_API_KEY" \
-          -H "Content-Type: application/json" \
-          -d "$test_payload")
-        
-        echo "Test response: $test_response"
-        
-        # Check if translation was successful
-        if echo "$test_response" | jq -e '.status == "COMPLETED"' > /dev/null 2>&1; then
-          echo "✅ Endpoint is responding correctly!"
-        else
-          echo "⚠️ Endpoint might need more time to warm up"
         fi
 
