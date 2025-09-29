@@ -49,27 +49,27 @@ jobs:
     - name: Validate confirmation
       run: |
         if [ "${{ github.event.inputs.confirm_destroy }}" != "CONFIRM" ]; then
-          echo "❌ Destruction not confirmed. You must type 'CONFIRM' to proceed."
+          echo "Destruction not confirmed. You must type 'CONFIRM' to proceed."
           echo "This is a safety measure to prevent accidental endpoint destruction."
           exit 1
         fi
-        echo "✅ Destruction confirmed by user: ${{ github.actor }}"
+        echo "Destruction confirmed by user: ${{ github.actor }}"
     
     - name: Check for emergency destruction
       id: emergency
       run: |
         if [ "${{ github.event.inputs.model_type }}" = "emergency-all" ]; then
-          echo "🚨 EMERGENCY DESTRUCTION REQUESTED"
+          echo "EMERGENCY DESTRUCTION REQUESTED"
           echo "This will destroy ALL endpoints in ALL environments!"
           echo "is-emergency=true" >> $GITHUB_OUTPUT
         else
           echo "is-emergency=false" >> $GITHUB_OUTPUT
         fi
     
-    - name: 🎯 Generate destruction matrix
+    - name: Generate destruction matrix
       id: matrix
       run: |
-        echo "🎯 Generating destruction matrix..."
+        echo "Generating destruction matrix..."
         
         # Handle emergency destruction
         if [ "${{ github.event.inputs.model_type }}" = "emergency-all" ]; then
@@ -81,12 +81,12 @@ jobs:
         fi
         
         echo "destroy-matrix=$matrix" >> $GITHUB_OUTPUT
-        echo " Destroy matrix: $matrix"
+        echo "Destroy matrix: $matrix"
     
-    - name: 🌍 Generate environment matrix
+    - name: Generate environment matrix
       id: envs
       run: |
-        echo "🌍 Generating environment matrix..."
+        echo "Generating environment matrix..."
         
         if [ "${{ github.event.inputs.environment }}" = "all-environments" ] || [ "${{ github.event.inputs.model_type }}" = "emergency-all" ]; then
           environments='["staging", "production"]'
@@ -95,18 +95,18 @@ jobs:
         fi
         
         echo "environments=$environments" >> $GITHUB_OUTPUT
-        echo "🌍 Target environments: $environments"
+        echo "Target environments: $environments"
     
     - name: Destruction summary
       run: |
-        echo "## ⚠️ Destruction Plan" >> $GITHUB_STEP_SUMMARY
+        echo "## Destruction Plan" >> $GITHUB_STEP_SUMMARY
         echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
         echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| 🎯 Models | \`${{ github.event.inputs.model_type }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| 🌍 Environments | \`${{ github.event.inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| 🚨 Emergency | ${{ steps.emergency.outputs.is-emergency }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| 👤 Requested by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| 🕐 Time | $(date -u +%Y-%m-%dT%H:%M:%SZ) |" >> $GITHUB_STEP_SUMMARY
+        echo "| Models | \`${{ github.event.inputs.model_type }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Environments | \`${{ github.event.inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Emergency | ${{ steps.emergency.outputs.is-emergency }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Requested by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Time | $(date -u +%Y-%m-%dT%H:%M:%SZ) |" >> $GITHUB_STEP_SUMMARY
 
   # ============================================================================
   # DESTRUCTION MATRIX
@@ -127,21 +127,21 @@ jobs:
     environment: ${{ matrix.environment }}
     
     steps:
-    - name: 📥 Checkout repository
+    - name: Checkout repository
       uses: actions/checkout@v4
     
     - name: Start destruction timer
       id: start-time
       run: echo "start-time=$(date +%s)" >> $GITHUB_OUTPUT
     
-    - name: 🐍 Set up Python
+    - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
     
-    - name: 📦 Install management tools
+    - name: Install management tools
       run: |
-        echo "📦 Installing RunPod management tools..."
+        echo "Installing RunPod management tools..."
         pip install runpod-python requests
     
     - name: Check endpoint existence
@@ -149,7 +149,7 @@ jobs:
       env:
         RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       run: |
-        echo "🔍 Checking if endpoint exists..."
+        echo "Checking if endpoint exists..."
         
         # Get endpoint name from config
         endpoint_name=$(jq -r '.["${{ matrix.model_type }}"].name' runpod-config.json)
@@ -169,7 +169,7 @@ jobs:
         echo "Environment: ${{ matrix.environment }}"
         
         if [ "${{ needs.validate.outputs.is-emergency }}" = "true" ]; then
-          echo "🚨 EMERGENCY DESTRUCTION MODE"
+          echo "EMERGENCY DESTRUCTION MODE"
         fi
         
         # Manual destruction required
@@ -184,9 +184,9 @@ jobs:
         end_time=$(date +%s)
         destroy_time=$((end_time - start_time))
         echo "destroy-time=${destroy_time}" >> $GITHUB_OUTPUT
-        echo "🕐 Destruction of ${{ matrix.model_type }} completed in ${destroy_time} seconds"
+        echo "Destruction of ${{ matrix.model_type }} completed in ${destroy_time} seconds"
     
-    - name: 💾 Log destruction
+    - name: Log destruction
       run: |
         # Create destruction log
         cat > destruction-${{ matrix.model_type }}-${{ matrix.environment }}.json << EOF
@@ -204,7 +204,7 @@ jobs:
         }
         EOF
         
-        echo "📝 Destruction logged"
+        echo "Destruction logged"
     
     - name: Upload destruction logs
       uses: actions/upload-artifact@v3
@@ -213,17 +213,17 @@ jobs:
         path: destruction-${{ matrix.model_type }}-${{ matrix.environment }}.json
         retention-days: 90
     
-    - name: ✅ Destruction complete
+    - name: Destruction complete
       run: |
         if [ "${{ steps.check.outputs.exists }}" = "true" ]; then
           echo "DESTRUCTION SUCCESSFUL!"
           echo "Endpoint: ${{ steps.check.outputs.endpoint-name }}"
           echo "Environment: ${{ matrix.environment }}"
           echo "Time: ${{ steps.timing.outputs.destroy-time }} seconds"
-          echo "💰 This endpoint is no longer incurring costs"
+          echo "This endpoint is no longer incurring costs"
         else
-          echo "ℹ️ Endpoint was already destroyed or didn't exist"
-          echo "💰 No costs were being incurred"
+          echo "Endpoint was already destroyed or didn't exist"
+          echo "No costs were being incurred"
         fi
 
   # ============================================================================
@@ -236,7 +236,7 @@ jobs:
     if: always() && needs.validate.result == 'success'
     
     steps:
-    - name: 📥 Download destruction logs
+    - name: Download destruction logs
       uses: actions/download-artifact@v3
       with:
         path: destruction-logs
@@ -247,7 +247,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         
         if [ "${{ needs.validate.outputs.is-emergency }}" = "true" ]; then
-          echo "### 🚨 EMERGENCY DESTRUCTION COMPLETED" >> $GITHUB_STEP_SUMMARY
+          echo "### EMERGENCY DESTRUCTION COMPLETED" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
         fi
         
@@ -269,12 +269,12 @@ jobs:
                 cost_per_hour="0.50"
                 
                 if [ "$existed" = "true" ]; then
-                  status="✅ Destroyed"
-                  cost_status="💰 \$${cost_per_hour}/hour"
+                  status="Destroyed"
+                  cost_status="\$${cost_per_hour}/hour"
                   total_savings=$(echo "$total_savings + $cost_per_hour" | bc -l 2>/dev/null || echo "0.50")
                 else
-                  status="ℹ️ Not Found"
-                  cost_status="💰 \$0.00/hour"
+                  status="Not Found"
+                  cost_status="\$0.00/hour"
                 fi
                 
                 echo "| $model_type | $environment | $status | ${destroy_time}s | $cost_status |" >> $GITHUB_STEP_SUMMARY
@@ -284,13 +284,13 @@ jobs:
         done
         
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 💰 Cost Impact" >> $GITHUB_STEP_SUMMARY
+        echo "### Cost Impact" >> $GITHUB_STEP_SUMMARY
         echo "- **Hourly savings**: Up to \$${total_savings:-0.50}/hour" >> $GITHUB_STEP_SUMMARY
         echo "- **Daily savings**: Up to \$$(echo "scale=2; ${total_savings:-0.50} * 24" | bc -l 2>/dev/null || echo "12.00")/day" >> $GITHUB_STEP_SUMMARY
         echo "- **Monthly savings**: Up to \$$(echo "scale=2; ${total_savings:-0.50} * 24 * 30" | bc -l 2>/dev/null || echo "360.00")/month" >> $GITHUB_STEP_SUMMARY
         
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "###  Destruction Details" >> $GITHUB_STEP_SUMMARY
+        echo "### Destruction Details" >> $GITHUB_STEP_SUMMARY
         echo "- **Requested by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Workflow run**: [\#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
         echo "- **Timestamp**: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
@@ -299,21 +299,21 @@ jobs:
   # FINAL COST CHECK
   # ============================================================================
   cost-check:
-    name: 💰 Final Cost Check
+    name: Final Cost Check
     runs-on: ubuntu-latest
     needs: [destroy]
     if: needs.destroy.result == 'success'
     
     steps:
-    - name: 📥 Checkout repository
+    - name: Checkout repository
       uses: actions/checkout@v4
     
-    - name: 🐍 Set up Python
+    - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
     
-    - name: 📦 Install cost checking tools
+    - name: Install cost checking tools
       run: |
         pip install runpod-python
     
@@ -334,13 +334,13 @@ jobs:
   # NOTIFICATION
   # ============================================================================
   notify:
-    name: 📢 Notify Destruction
+    name: Notify Destruction
     runs-on: ubuntu-latest
     needs: [validate, destroy, summary]
     if: always()
     
     steps:
-    - name: 📢 Destruction notification
+    - name: Destruction notification
       run: |
         echo "DESTRUCTION COMPLETED"
         echo "Status: ${{ needs.destroy.result }}"
@@ -350,9 +350,9 @@ jobs:
         echo "Requested by: ${{ github.actor }}"
         
         if [ "${{ needs.destroy.result }}" = "success" ]; then
-          echo "✅ All targeted endpoints have been destroyed"
-          echo "💰 Costs have been reduced or eliminated"
+          echo "All targeted endpoints have been destroyed"
+          echo "Costs have been reduced or eliminated"
         else
-          echo "❌ Some destructions may have failed"
-          echo "💡 Check the workflow logs for details"
+          echo "Some destructions may have failed"
+          echo "Check the workflow logs for details"
         fi
