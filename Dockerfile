@@ -1,11 +1,14 @@
 FROM pytorch/pytorch:2.2.1-cuda12.1-cudnn8-runtime
 
-# Install git for Python packages that need it
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    g++ \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy requirements first for better Docker layer caching
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir --upgrade pip
