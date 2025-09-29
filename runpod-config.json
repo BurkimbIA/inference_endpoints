@@ -2,8 +2,8 @@
   "template_config": {
     "name": "burkimbia-translation-models-template",
     "image": "docker.io/sawalle/translation-models:latest",
-  "container_disk_size": 25,
-  "volume_size": 8
+    "container_disk_size": 25,
+    "volume_size": 8
   },
   "mistral_endpoint": {
     "endpoint_name": "burkimbia-mistral-translation",

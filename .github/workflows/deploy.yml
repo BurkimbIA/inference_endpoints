@@ -40,8 +40,8 @@ jobs:
         endpoint_name=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].endpoint_name' runpod-config.json)
         model_type=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].model_type' runpod-config.json)
         gpu_types=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].gpu_types[0]' runpod-config.json)
-        container_disk_size=$(jq -r '.template_config.container_disk_size' runpod-config.json)
-        volume_size=$(jq -r '.template_config.volume_size' runpod-config.json)
+        container_disk_gb=$(jq -r '.template_config.container_disk_size' runpod-config.json)
+        volume_gb=$(jq -r '.template_config.volume_size' runpod-config.json)
         min_workers=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].scaling.min_workers' runpod-config.json)
         max_workers=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].scaling.max_workers' runpod-config.json)
         idle_timeout=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].idle_timeout' runpod-config.json)
@@ -51,35 +51,39 @@ jobs:
         
         echo "Deploying $endpoint_name (model: $model_type)"
         echo "GPU Type: $gpu_types"
-        
-        # Extract numeric values from disk sizes
-        container_disk_gb=$(echo "$container_disk_size" | grep -o '[0-9]\+')
-        volume_gb=$(echo "$volume_size" | grep -o '[0-9]\+')
+        echo "Disk: ${container_disk_gb}GB, Volume: ${volume_gb}GB"
         
         # Check/Create template
-        existing_templates=$(curl -s -H "Authorization: Bearer $RUNPOD_API_KEY" "https://rest.runpod.io/v1/templates")
-        template_id=$(echo "$existing_templates" | jq -r --arg name "$template_name" '.[] | select(.name == $name) | .id')
+        echo "Checking for existing template..."
+        existing_templates=$(curl -s -H "Authorization: Bearer $RUNPOD_API_KEY" \
+          "https://rest.runpod.io/v1/templates")
+        
+        template_id=$(echo "$existing_templates" | jq -r --arg name "$template_name" \
+          '.[] | select(.name == $name) | .id')
         
         if [ -z "$template_id" ] || [ "$template_id" = "null" ]; then
           echo "Creating template: $template_name"
           template_response=$(curl -s -X POST "https://rest.runpod.io/v1/templates" \
             -H "Authorization: Bearer $RUNPOD_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"name\": \"$template_name\",
-              \"imageName\": \"$target_image\",
-              \"isServerless\": true,
-              \"containerDiskInGb\": $container_disk_gb,
-              \"volumeInGb\": $volume_gb,
-              \"env\": {
-                \"HF_TOKEN\": \"$HF_TOKEN\",
-                \"MODEL_TYPE\": \"$model_type\"
+            -d '{
+              "name": "'"$template_name"'",
+              "imageName": "'"$target_image"'",
+              "isServerless": true,
+              "containerDiskInGb": '"$container_disk_gb"',
+              "volumeInGb": '"$volume_gb"',
+              "volumeMountPath": "/runpod-volume",
+              "env": {
+                "HF_TOKEN": "'"$HF_TOKEN"'",
+                "MODEL_TYPE": "'"$model_type"'"
               }
-            }")
+            }')
+          
+          echo "Template response: $template_response"
           template_id=$(echo "$template_response" | jq -r '.id')
           
           if [ -z "$template_id" ] || [ "$template_id" = "null" ]; then
-            echo "❌ Template creation failed: $template_response"
+            echo "❌ Template creation failed"
             exit 1
           fi
           echo "✅ Template created: $template_id"
@@ -87,26 +91,41 @@ jobs:
           echo "✅ Template exists: $template_id"
         fi
         
+        # Check if endpoint already exists
+        echo "Checking for existing endpoint..."
+        existing_endpoints=$(curl -s -H "Authorization: Bearer $RUNPOD_API_KEY" \
+          "https://rest.runpod.io/v1/endpoints")
+        
+        endpoint_id=$(echo "$existing_endpoints" | jq -r --arg name "$endpoint_name" \
+          '.[] | select(.name == $name) | .id')
+        
+        if [ -n "$endpoint_id" ] && [ "$endpoint_id" != "null" ]; then
+          echo "⚠️  Endpoint already exists: $endpoint_id"
+          echo "🌐 URL: https://api.runpod.ai/v2/$endpoint_id/run"
+          exit 0
+        fi
+        
         # Create endpoint
         echo "Creating endpoint..."
         endpoint_response=$(curl -s -X POST "https://rest.runpod.io/v1/endpoints" \
           -H "Authorization: Bearer $RUNPOD_API_KEY" \
           -H "Content-Type: application/json" \
-          -d "{
-            \"name\": \"$endpoint_name\",
-            \"templateId\": \"$template_id\",
-            \"gpuTypeIds\": [\"$gpu_types\"],
-            \"idleTimeout\": $idle_timeout,
-            \"workersMin\": $min_workers,
-            \"workersMax\": $max_workers
-          }")
+          -d '{
+            "name": "'"$endpoint_name"'",
+            "templateId": "'"$template_id"'",
+            "gpuTypeIds": ["'"$gpu_types"'"],
+            "idleTimeout": '"$idle_timeout"',
+            "workersMin": '"$min_workers"',
+            "workersMax": '"$max_workers"'
+          }')
         
+        echo "Endpoint response: $endpoint_response"
         endpoint_id=$(echo "$endpoint_response" | jq -r '.id')
         
         if [ -n "$endpoint_id" ] && [ "$endpoint_id" != "null" ]; then
           echo "✅ Endpoint deployed: $endpoint_id"
-          echo "🌐 URL: https://api.runpod.ai/v1/$endpoint_id/run"
+          echo "🌐 URL: https://api.runpod.ai/v2/$endpoint_id/run"
         else
-          echo "❌ Deploy failed: $endpoint_response"
+          echo "❌ Deploy failed"
           exit 1
         fi
