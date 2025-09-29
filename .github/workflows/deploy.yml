@@ -50,6 +50,11 @@ jobs:
         target_image="${{ env.IMAGE_NAME }}:latest"
         
         echo "Deploying $endpoint_name (model: $model_type)"
+        echo "GPU Type: $gpu_types"
+        
+        # Extract numeric values from disk sizes
+        container_disk_gb=$(echo "$container_disk_size" | grep -o '[0-9]\+')
+        volume_gb=$(echo "$volume_size" | grep -o '[0-9]\+')
         
         # Check/Create template
         existing_templates=$(curl -s -H "Authorization: Bearer $RUNPOD_API_KEY" "https://rest.runpod.io/v1/templates")
@@ -64,14 +69,19 @@ jobs:
               \"name\": \"$template_name\",
               \"imageName\": \"$target_image\",
               \"isServerless\": true,
-              \"containerDiskInGb\": $(echo $container_disk_size | sed 's/GB//'),
-              \"volumeInGb\": $(echo $volume_size | sed 's/GB//'),
+              \"containerDiskInGb\": $container_disk_gb,
+              \"volumeInGb\": $volume_gb,
               \"env\": {
                 \"HF_TOKEN\": \"$HF_TOKEN\",
                 \"MODEL_TYPE\": \"$model_type\"
               }
             }")
           template_id=$(echo "$template_response" | jq -r '.id')
+          
+          if [ -z "$template_id" ] || [ "$template_id" = "null" ]; then
+            echo "❌ Template creation failed: $template_response"
+            exit 1
+          fi
           echo "✅ Template created: $template_id"
         else
           echo "✅ Template exists: $template_id"
@@ -95,7 +105,7 @@ jobs:
         
         if [ -n "$endpoint_id" ] && [ "$endpoint_id" != "null" ]; then
           echo "✅ Endpoint deployed: $endpoint_id"
-          echo "🌐 URL: https://api.runpod.ai/v2/$endpoint_id/run"
+          echo "🌐 URL: https://api.runpod.ai/v1/$endpoint_id/run"
         else
           echo "❌ Deploy failed: $endpoint_response"
           exit 1
