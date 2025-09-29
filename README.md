@@ -1,6 +1,5 @@
 # BURKIMBIA Translation Models - RunPod Serverless Deployment
 
-Student-Budget Friendly: Optimized for NVIDIA T4 GPUs ($0.5/hour) to keep costs low while maintaining excellent performance.
 
 A robust CI/CD pipeline for deploying French ↔ Mooré translation models (Mistral and NLLB) on RunPod serverless infrastructure.
 
@@ -144,6 +143,7 @@ DOCKER_PASSWORD=your-docker-hub-password
 
 ### Translation request
 
+**Basic request:**
 ```json
 {
   "text": "Bonjour le monde",
@@ -152,6 +152,53 @@ DOCKER_PASSWORD=your-docker-hub-password
   "tgt_lang": "moor_Latn"
 }
 ```
+
+**With max_tokens parameter (recommended):**
+```json
+{
+  "text": "Bonjour le monde",
+  "model_type": "mistral",
+  "src_lang": "fra_Latn",
+  "tgt_lang": "moor_Latn",
+  "max_tokens": 256
+}
+```
+
+**NLLB with advanced parameters:**
+```json
+{
+  "text": "Bonjour le monde",
+  "model_type": "nllb",
+  "src_lang": "fr_Latn",
+  "tgt_lang": "moor_Latn",
+  "max_tokens": 200,
+  "num_beams": 3,
+  "max_input_length": 512
+}
+```
+
+### Parameters
+
+#### Common Parameters (Both Models)
+
+- **text** (required): Text to translate
+- **model_type** (required): "mistral" or "nllb"
+- **src_lang** (required): Source language code
+- **tgt_lang** (required): Target language code
+- **max_tokens** (optional): Maximum tokens to generate
+  - **Mistral**: Default is 512 tokens
+  - **NLLB**: If not specified, uses dynamic calculation (a + b * input_length)
+
+#### NLLB-Specific Parameters
+
+When `max_tokens` is not provided, NLLB uses these parameters for dynamic token calculation:
+
+- **a** (optional): Base token count (default: 32)
+- **b** (optional): Multiplier for input length (default: 3)  
+- **max_input_length** (optional): Maximum input tokens (default: 1024)
+- **num_beams** (optional): Number of beams for beam search (default: 5)
+
+**Note:** If you specify `max_tokens`, the `a` and `b` parameters are ignored.
 
 ### Response
 
@@ -182,14 +229,54 @@ DOCKER_PASSWORD=your-docker-hub-password
 }
 ```
 
-## Monitoring and Health Checks
+### Usage Examples
 
-The system includes comprehensive monitoring:
+#### 1. Quick Translation (Mistral)
+```json
+{
+  "text": "Comment allez-vous?",
+  "model_type": "mistral",
+  "src_lang": "fra_Latn",
+  "tgt_lang": "moor_Latn"
+}
+```
 
-- Health Checks: Model loading status, system resources, environment validation
-- Performance Metrics: Request latencies, success rates, system utilization
-- Error Tracking: Detailed error logging and categorization
-- Resource Monitoring: GPU memory, CPU, disk usage tracking
+#### 2. Short Response (Both Models)
+```json
+{
+  "text": "Oui",
+  "model_type": "nllb",
+  "src_lang": "fr_Latn",
+  "tgt_lang": "moor_Latn",
+  "max_tokens": 10
+}
+```
+
+#### 3. Long Text Translation
+```json
+{
+  "text": "Long paragraph to translate...",
+  "model_type": "nllb",
+  "src_lang": "fr_Latn",
+  "tgt_lang": "moor_Latn",
+  "max_tokens": 500,
+  "max_input_length": 2048
+}
+```
+
+#### 4. High Quality Translation (NLLB)
+```json
+{
+  "text": "Technical documentation text",
+  "model_type": "nllb",
+  "src_lang": "en_Latn",
+  "tgt_lang": "moor_Latn",
+  "max_tokens": 300,
+  "num_beams": 8
+}
+```
+
+
 
 ## Testing
 
@@ -229,13 +316,3 @@ The smoke tests include:
 4. Submit a pull request
 5. CI pipeline will automatically test and validate
 
-## License
-
-This project is licensed under the MIT License.
-
-## Support
-
-For issues and questions:
-- Create an issue in the GitHub repository
-- Contact the development team
-- Check the troubleshooting guide above

@@ -82,12 +82,22 @@ def validate_translation_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
                 f"Language {src_lang} or {tgt_lang} might not be supported by NLLB model"
             )
 
+    # Optional parameters for both models
+    max_tokens = job_input.get("max_tokens")
+    if max_tokens is not None and (not isinstance(max_tokens, int) or max_tokens <= 0):
+        raise ValueError("'max_tokens' must be a positive integer")
+
     generation_params = {}
-    if model_type == "nllb":
+    if model_type == "mistral":
+        generation_params = {
+            "max_tokens": max_tokens or 512,  # Default for Mistral
+        }
+    elif model_type == "nllb":
         generation_params = {
             "a": job_input.get("a", 32),
             "b": job_input.get("b", 3),
             "max_input_length": job_input.get("max_input_length", 1024),
+            "max_tokens": max_tokens,  # Can be None to use a+b formula
             "num_beams": job_input.get("num_beams", 5),
         }
 
@@ -113,7 +123,9 @@ def translate_text(validated_input: Dict[str, Any]) -> str:
         if mistral_model is None:
             raise RuntimeError("Mistral model not loaded.")
 
-        return mistral_model.translate(text, src_lang, tgt_lang)
+        return mistral_model.translate(
+            text, src_lang, tgt_lang, max_tokens=generation_params["max_tokens"]
+        )
 
     elif model_type == "nllb":
         if nllb_model is None:
@@ -133,7 +145,10 @@ def handler(job):
         "src_lang": "source_language_code",
         "tgt_lang": "target_language_code",
 
-        # Optional NLLB parameters
+        # Optional parameters for both models
+        "max_tokens": 512,  # Maximum tokens to generate (default: 512 for Mistral, dynamic for NLLB)
+
+        # Optional NLLB-specific parameters (used only when max_tokens is not provided)
         "a": 32,
         "b": 3,
         "max_input_length": 1024,

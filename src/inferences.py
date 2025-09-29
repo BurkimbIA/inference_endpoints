@@ -33,7 +33,7 @@ Based on source language ({src_name}), provide the {tgt_name} text.
 ### {tgt_name}:
 """
 
-    def translate(self, text: str, src_lang: str, tgt_lang: str) -> str:
+    def translate(self, text: str, src_lang: str, tgt_lang: str, max_tokens: int = 512) -> str:
         lang_map = {"fra_Latn": "French", "moor_Latn": "Moore"}
         src_name = lang_map.get(src_lang, src_lang)
         tgt_name = lang_map.get(tgt_lang, tgt_lang)
@@ -44,7 +44,7 @@ Based on source language ({src_name}), provide the {tgt_name} text.
         outputs = self.model.generate(
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
-            max_new_tokens=512,
+            max_new_tokens=max_tokens,
             do_sample=False,
         )
         decoded = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -136,6 +136,7 @@ class NLLBTranslator:
         a=32,
         b=3,
         max_input_length=1024,
+        max_tokens=None,
         num_beams=5,
         **kwargs,
     ):
@@ -151,10 +152,16 @@ class NLLBTranslator:
             max_length=max_input_length,
         )
 
+        # Use max_tokens if provided, otherwise use the a + b * input_length formula
+        if max_tokens is not None:
+            max_new_tokens = max_tokens
+        else:
+            max_new_tokens = int(a + b * inputs.input_ids.shape[1])
+
         result = self.model.generate(
             **inputs.to(self.model.device),
             forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(tgt_lang),
-            max_new_tokens=int(a + b * inputs.input_ids.shape[1]),
+            max_new_tokens=max_new_tokens,
             num_beams=num_beams,
             no_repeat_ngram_size=3,
             repetition_penalty=1.2,

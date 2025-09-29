@@ -167,31 +167,3 @@ jobs:
         echo "Image: ${{ needs.validate.outputs.target-image }}"
         echo "Time: ${{ steps.timing.outputs.deploy-time }} seconds"
 
-  # ============================================================================
-  # TRIGGER TESTS
-  # ============================================================================
-  trigger-tests:
-    name: Trigger Tests
-    runs-on: ubuntu-latest
-    needs: [deploy]
-    if: github.event.inputs.run_tests == 'true' && needs.deploy.result == 'success'
-    
-    steps:
-    - name: Trigger smoke tests
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          console.log('Triggering smoke tests...');
-          
-          await github.rest.actions.createWorkflowDispatch({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            workflow_id: 'test.yml',
-            ref: '${{ github.ref }}',
-            inputs: {
-              environment: '${{ github.event.inputs.environment }}',
-              models: '${{ github.event.inputs.model_type }}'
-            }
-          });
-
