@@ -19,6 +19,10 @@ RUN useradd --create-home --shell /bin/bash app
 RUN chown -R app:app /app
 USER app
 
+# Essential environment variables
+ENV HF_TOKEN=${HF_TOKEN}
+
+# Cache directories
 ENV TRANSFORMERS_CACHE=/app/cache
 ENV HF_HOME=/app/cache
 ENV TORCH_HOME=/app/cache
