@@ -30,102 +30,160 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: pip install requests
+    
     - name: Deploy to RunPod
       env:
         RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
         MODEL_TYPE: ${{ matrix.model_type }}
+        IMAGE_NAME: ${{ env.IMAGE_NAME }}
       run: |
+        python3 << 'EOF'
+        import os
+        import sys
+        import json
+        import requests
+        
         # Load config
-        endpoint_name=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].endpoint_name' runpod-config.json)
-        model_type=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].model_type' runpod-config.json)
-        gpu_types=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].gpu_types[0]' runpod-config.json)
-        container_disk_gb=$(jq -r '.template_config.container_disk_size' runpod-config.json)
-        volume_gb=$(jq -r '.template_config.volume_size' runpod-config.json)
-        min_workers=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].scaling.min_workers' runpod-config.json)
-        max_workers=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].scaling.max_workers' runpod-config.json)
-        idle_timeout=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].idle_timeout' runpod-config.json)
+        with open('runpod-config.json', 'r') as f:
+            config = json.load(f)
         
-        template_name="burkimbia-translation-$model_type-template"
-        target_image="${{ env.IMAGE_NAME }}:latest"
+        model_type = os.environ['MODEL_TYPE']
+        endpoint_config = config[model_type]
+        template_config = config['template_config']
         
-        echo "Deploying $endpoint_name (model: $model_type)"
-        echo "GPU Type: $gpu_types"
-        echo "Disk: ${container_disk_gb}GB, Volume: ${volume_gb}GB"
+        # Setup
+        api_key = os.environ['RUNPOD_API_KEY']
+        hf_token = os.environ['HF_TOKEN']
+        image_name = os.environ['IMAGE_NAME']
+        
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        base_url = 'https://rest.runpod.io/v1'
+        
+        # Variables
+        endpoint_name = endpoint_config['endpoint_name']
+        model_type_name = endpoint_config['model_type']
+        gpu_types = endpoint_config['gpu_types'][0]
+        idle_timeout = endpoint_config['idle_timeout']
+        min_workers = endpoint_config['scaling']['min_workers']
+        max_workers = endpoint_config['scaling']['max_workers']
+        
+        template_name = f"burkimbia-translation-{model_type_name}-template"
+        target_image = f"{image_name}:latest"
+        
+        print(f"Deploying {endpoint_name} (model: {model_type_name})")
+        print(f"GPU Type: {gpu_types}")
+        print(f"Image: {target_image}")
         
         # Check/Create template
-        echo "Checking for existing template..."
-        existing_templates=$(curl -s -H "Authorization: Bearer $RUNPOD_API_KEY" \
-          "https://rest.runpod.io/v1/templates")
+        print("\nChecking for existing template...")
+        try:
+            resp = requests.get(f'{base_url}/templates', headers=headers, timeout=30)
+            resp.raise_for_status()
+            templates = resp.json()
+            
+            template_id = None
+            for template in templates:
+                if template.get('name') == template_name:
+                    template_id = template.get('id')
+                    break
+            
+            if not template_id:
+                print(f"Creating template: {template_name}")
+                template_payload = {
+                    "name": template_name,
+                    "imageName": target_image,
+                    "isServerless": True,
+                    "containerDiskInGb": template_config['container_disk_size'],
+                    "volumeInGb": template_config['volume_size'],
+                    "volumeMountPath": "/runpod-volume",
+                    "env": {
+                        "HF_TOKEN": hf_token,
+                        "MODEL_TYPE": model_type_name
+                    }
+                }
+                
+                resp = requests.post(f'{base_url}/templates', headers=headers, json=template_payload, timeout=30)
+                resp.raise_for_status()
+                template_result = resp.json()
+                template_id = template_result.get('id')
+                
+                if not template_id:
+                    print(f"❌ Template creation failed: {template_result}")
+                    sys.exit(1)
+                print(f"✅ Template created: {template_id}")
+            else:
+                print(f"✅ Template exists: {template_id}")
         
-        template_id=$(echo "$existing_templates" | jq -r --arg name "$template_name" \
-          '.[] | select(.name == $name) | .id')
-        
-        if [ -z "$template_id" ] || [ "$template_id" = "null" ]; then
-          echo "Creating template: $template_name"
-          template_response=$(curl -s -X POST "https://rest.runpod.io/v1/templates" \
-            -H "Authorization: Bearer $RUNPOD_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "name": "'"$template_name"'",
-              "imageName": "'"$target_image"'",
-              "isServerless": true,
-              "containerDiskInGb": '"$container_disk_gb"',
-              "volumeInGb": '"$volume_gb"',
-              "volumeMountPath": "/runpod-volume",
-              "env": {
-                "HF_TOKEN": "'"$HF_TOKEN"'",
-                "MODEL_TYPE": "'"$model_type"'"
-              }
-            }')
-          
-          echo "Template response: $template_response"
-          template_id=$(echo "$template_response" | jq -r '.id')
-          
-          if [ -z "$template_id" ] || [ "$template_id" = "null" ]; then
-            echo "❌ Template creation failed"
-            exit 1
-          fi
-          echo "✅ Template created: $template_id"
-        else
-          echo "✅ Template exists: $template_id"
-        fi
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error with templates API: {e}")
+            if hasattr(e.response, 'text'):
+                print(f"Response: {e.response.text}")
+            sys.exit(1)
         
         # Check if endpoint already exists
-        echo "Checking for existing endpoint..."
-        existing_endpoints=$(curl -s -H "Authorization: Bearer $RUNPOD_API_KEY" \
-          "https://rest.runpod.io/v1/endpoints")
+        print("\nChecking for existing endpoint...")
+        try:
+            resp = requests.get(f'{base_url}/endpoints', headers=headers, timeout=30)
+            resp.raise_for_status()
+            endpoints = resp.json()
+            
+            endpoint_id = None
+            for endpoint in endpoints:
+                if endpoint.get('name') == endpoint_name:
+                    endpoint_id = endpoint.get('id')
+                    break
+            
+            if endpoint_id:
+                print(f"⚠️  Endpoint already exists: {endpoint_id}")
+                print(f"🌐 URL: https://api.runpod.ai/v1/{endpoint_id}/run")
+                sys.exit(0)
         
-        endpoint_id=$(echo "$existing_endpoints" | jq -r --arg name "$endpoint_name" \
-          '.[] | select(.name == $name) | .id')
-        
-        if [ -n "$endpoint_id" ] && [ "$endpoint_id" != "null" ]; then
-          echo "⚠️  Endpoint already exists: $endpoint_id"
-          echo "🌐 URL: https://api.runpod.ai/v2/$endpoint_id/run"
-          exit 0
-        fi
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error checking endpoints: {e}")
+            if hasattr(e.response, 'text'):
+                print(f"Response: {e.response.text}")
+            sys.exit(1)
         
         # Create endpoint
-        echo "Creating endpoint..."
-        endpoint_response=$(curl -s -X POST "https://rest.runpod.io/v1/endpoints" \
-          -H "Authorization: Bearer $RUNPOD_API_KEY" \
-          -H "Content-Type: application/json" \
-          -d '{
-            "name": "'"$endpoint_name"'",
-            "templateId": "'"$template_id"'",
-            "gpuTypeIds": ["'"$gpu_types"'"],
-            "idleTimeout": '"$idle_timeout"',
-            "workersMin": '"$min_workers"',
-            "workersMax": '"$max_workers"'
-          }')
+        print(f"\nCreating endpoint...")
+        try:
+            endpoint_payload = {
+                "name": endpoint_name,
+                "templateId": template_id,
+                "gpuTypeIds": [gpu_types],
+                "idleTimeout": idle_timeout,
+                "workersMin": min_workers,
+                "workersMax": max_workers
+            }
+            
+            resp = requests.post(f'{base_url}/endpoints', headers=headers, json=endpoint_payload, timeout=30)
+            resp.raise_for_status()
+            endpoint_result = resp.json()
+            endpoint_id = endpoint_result.get('id')
+            
+            if endpoint_id:
+                print(f"✅ Endpoint deployed: {endpoint_id}")
+                print(f"🌐 URL: https://api.runpod.ai/v1/{endpoint_id}/run")
+            else:
+                print(f"❌ Deploy failed: {endpoint_result}")
+                sys.exit(1)
         
-        echo "Endpoint response: $endpoint_response"
-        endpoint_id=$(echo "$endpoint_response" | jq -r '.id')
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error creating endpoint: {e}")
+            if hasattr(e.response, 'text'):
+                print(f"Response: {e.response.text}")
+            sys.exit(1)
         
-        if [ -n "$endpoint_id" ] && [ "$endpoint_id" != "null" ]; then
-          echo "✅ Endpoint deployed: $endpoint_id"
-          echo "🌐 URL: https://api.runpod.ai/v2/$endpoint_id/run"
-        else
-          echo "❌ Deploy failed"
-          exit 1
-        fi
+        EOF
