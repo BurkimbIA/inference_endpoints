@@ -25,7 +25,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: burkimbia/translation-models
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/translation-models
 
 jobs:
   test:
@@ -150,12 +150,7 @@ jobs:
         build_time=$((end_time - start_time))
         echo "build-time=${build_time}" >> $GITHUB_OUTPUT
         echo "Build completed in ${build_time} seconds"
-    
-    - name: Build success notification
-      run: |
-        echo "BUILD SUCCESSFUL!"
-        echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-        echo "Build time: ${{ steps.timing.outputs.build-time }} seconds"
+
 
   cleanup:
     name: Cleanup Old Docker Images
@@ -170,7 +165,7 @@ jobs:
         echo "Cleaning up old Docker images (keeping latest 5)..."
         
         # Get list of tags from Docker Hub API
-        REPO="burkimbia/translation-models"
+        REPO="${{ secrets.DOCKER_USERNAME }}/translation-models"
         TOKEN=$(curl -s -H "Content-Type: application/json" -X POST -d '{"username": "${{ secrets.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}' https://hub.docker.com/v2/users/login/ | jq -r .token)
         
         # Get all tags (excluding latest, main)
