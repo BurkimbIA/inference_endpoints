@@ -68,7 +68,6 @@ jobs:
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
     
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
       image-digest: ${{ steps.build.outputs.digest }}
       build-time: ${{ steps.timing.outputs.build-time }}
     
@@ -125,8 +124,7 @@ jobs:
           type=raw,value=run-${{ github.run_number }}
         labels: |
           org.opencontainers.image.title=Translation Models API
-          org.opencontainers.image.description=Docker image for AI translation models
-          org.opencontainers.image.vendor=Burkimbia
+          org.opencontainers.image.description=Docker image for AI moore translation models
     
     - name: Build Docker image
       id: build
