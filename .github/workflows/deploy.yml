@@ -42,7 +42,6 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: burkimbia/translation-models
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/translation-models
 
 jobs:
