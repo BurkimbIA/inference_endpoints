@@ -12,11 +12,6 @@ on:
           - mistral_endpoint
           - nllb_endpoint
           - unified_endpoint
-      image_tag:
-        description: 'Docker image tag'
-        required: false
-        default: 'latest'
-        type: string
 
 env:
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/translation-models
@@ -39,19 +34,20 @@ jobs:
       env:
         RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        MODEL_TYPE: ${{ matrix.model_type }}
       run: |
         # Load config
-        endpoint_name=$(jq -r '.["${{ matrix.model_type }}"].endpoint_name' runpod-config.json)
-        model_type=$(jq -r '.["${{ matrix.model_type }}"].model_type' runpod-config.json)
-        gpu_types=$(jq -r '.["${{ matrix.model_type }}"].gpu_types[0]' runpod-config.json)
+        endpoint_name=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].endpoint_name' runpod-config.json)
+        model_type=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].model_type' runpod-config.json)
+        gpu_types=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].gpu_types[0]' runpod-config.json)
         container_disk_size=$(jq -r '.template_config.container_disk_size' runpod-config.json)
         volume_size=$(jq -r '.template_config.volume_size' runpod-config.json)
-        min_workers=$(jq -r '.["${{ matrix.model_type }}"].scaling.min_workers' runpod-config.json)
-        max_workers=$(jq -r '.["${{ matrix.model_type }}"].scaling.max_workers' runpod-config.json)
-        idle_timeout=$(jq -r '.["${{ matrix.model_type }}"].idle_timeout' runpod-config.json)
+        min_workers=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].scaling.min_workers' runpod-config.json)
+        max_workers=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].scaling.max_workers' runpod-config.json)
+        idle_timeout=$(jq -r --arg mt "$MODEL_TYPE" '.[$mt].idle_timeout' runpod-config.json)
         
         template_name="burkimbia-translation-$model_type-template"
-        target_image="${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}"
+        target_image="${{ env.IMAGE_NAME }}:latest"
         
         echo "Deploying $endpoint_name (model: $model_type)"
         
@@ -104,4 +100,3 @@ jobs:
           echo "❌ Deploy failed: $endpoint_response"
           exit 1
         fi
-
