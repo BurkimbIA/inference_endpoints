@@ -24,8 +24,8 @@ on:
         type: boolean
 
 env:
-  REGISTRY: docker.io
-  IMAGE_NAME: burkimbia/translation-models
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/burkimbia/translation-models
 
 jobs:
   test:
@@ -85,53 +85,33 @@ jobs:
       with:
         driver-opts: |
           image=moby/buildkit:master
-    
-    - name: Log in to Docker Hub
-      if: github.event.inputs.push_image != 'false'
-      env:
-        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-      run: |
-        echo "Vérification des credentials Docker..."
-        echo "DOCKER_USERNAME length: ${#DOCKER_USERNAME}"
-        echo "DOCKER_PASSWORD length: ${#DOCKER_PASSWORD}"
-        
-        if [ -z "$DOCKER_USERNAME" ]; then
-          echo "❌ DOCKER_USERNAME secret est vide ou non défini"
-          echo "Vérifiez dans Settings > Secrets and variables > Actions"
-          exit 1
-        fi
-        if [ -z "$DOCKER_PASSWORD" ]; then
-          echo "❌ DOCKER_PASSWORD secret est vide ou non défini"
-          echo "Vérifiez dans Settings > Secrets and variables > Actions"
-          exit 1
-        fi
-        
-        echo "✅ Credentials Docker disponibles"
-        echo "Username: $DOCKER_USERNAME"
-        echo "Connexion à Docker Hub..."
-        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        images: ${{ env.IMAGE_NAME }}
         tags: |
           type=ref,event=branch
           type=ref,event=pr
           type=sha,prefix={{branch}}-
-          type=raw,value=${{ github.event.inputs.image_tag || 'latest' }},enable={{is_default_branch}}
+          type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=run-${{ github.run_number }}
-          type=raw,value={{date 'YYYYMMDD-HHmmss'}}
-    
-    - name: Build Docker image
+
+    - name: Build Docker image (and push to GHCR)
       id: build
       uses: docker/build-push-action@v5
       with:
         context: .
         platforms: linux/amd64
-        push: ${{ github.event.inputs.push_image != 'false' }}
+        push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
@@ -150,33 +130,10 @@ jobs:
     
     - name: Build success notification
       run: |
-        echo "BUILD SUCCESSFUL!"
-        echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-        echo "Build time: ${{ steps.timing.outputs.build-time }} seconds"
-
-  cleanup:
-    name: Cleanup Old Docker Images
-    runs-on: ubuntu-latest
-    needs: [build]
-    if: needs.build.result == 'success' && github.event_name == 'push'
-    continue-on-error: true
-    
-    steps:
-    - name: Delete old Docker Hub images
-      run: |
-        echo "Cleaning up old Docker images (keeping latest 5)..."
-        
-        # Get list of tags from Docker Hub API
-        REPO="burkimbia/translation-models"
-        TOKEN=$(curl -s -H "Content-Type: application/json" -X POST -d '{"username": "${{ secrets.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}' https://hub.docker.com/v2/users/login/ | jq -r .token)
-        
-        # Get all tags (excluding latest, main)
-        TAGS=$(curl -s -H "Authorization: JWT ${TOKEN}" "https://hub.docker.com/v2/repositories/${REPO}/tags/?page_size=100" | jq -r '.results[] | select(.name != "latest" and .name != "main" and (.name | startswith("run-"))) | .name' | sort -V | head -n -5)
-        
-        # Delete old tags
-        for tag in $TAGS; do
-          echo "Deleting tag: $tag"
-          curl -s -X DELETE -H "Authorization: JWT ${TOKEN}" "https://hub.docker.com/v2/repositories/${REPO}/tags/${tag}/" || echo "Failed to delete $tag"
-        done
-        
-        echo "Cleanup completed - kept latest 5 images"
+        echo "🎉 BUILD & PUSH SUCCESSFUL!"
+        echo "📦 Image: ${{ env.IMAGE_NAME }}"
+        echo "🏷️ Tags: ${{ steps.meta.outputs.tags }}"
+        echo "⏱️ Build time: ${{ steps.timing.outputs.build-time }} seconds"
+        echo ""
+        echo "🚀 Votre image est maintenant disponible sur GitHub Container Registry !"
+        echo "Pour utiliser: docker pull ${{ env.IMAGE_NAME }}:latest"
