@@ -2,36 +2,36 @@
   "template_config": {
     "name": "burkimbia-translation-models-template",
     "image": "docker.io/sawalle/translation-models:latest",
-  "container_disk_size": 24,
+  "container_disk_size": 32,
   "volume_size": 8
   },
   "mistral_endpoint": {
     "endpoint_name": "burkimbia-mistral-translation",
     "model_type": "mistral",
-  "gpu_types": ["NVIDIA T4"],
+  "gpu_types": ["NVIDIA A40"],
     "idle_timeout": 300,
     "scaling": {
-      "min_workers": 0,
-      "max_workers": 2
+      "min_workers": 1,
+      "max_workers": 1
     }
   },
   "nllb_endpoint": {
     "endpoint_name": "burkimbia-nllb-translation", 
     "model_type": "nllb",
-  "gpu_types": ["NVIDIA T4"],
+  "gpu_types": ["NVIDIA A40"],
     "idle_timeout": 300,
     "scaling": {
-      "min_workers": 0,
+      "min_workers": 1,
       "max_workers": 1
     }
   },
   "unified_endpoint": {
     "endpoint_name": "burkimbia-unified-translation",
     "model_type": "unified",
-  "gpu_types": ["NVIDIA T4"], 
+  "gpu_types": ["NVIDIA A40"], 
     "idle_timeout": 300,
     "scaling": {
-      "min_workers": 0,
+      "min_workers": 1,
       "max_workers": 1
     }
   }
