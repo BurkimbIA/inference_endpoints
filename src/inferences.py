@@ -71,6 +71,7 @@ login(token=auth_token)
 MODELS_URLS = {
     "V0.3(NLLB)": "burkimbia/BIA-NLLB-600M-david_5_epocks",
     "V0.5(NLLB)": "burkimbia/BIA-NLLB-1.3B-david_7_epocks",
+    "burkimbia/BIA-NLLB-600M-5E": "burkimbia/BIA-NLLB-600M-5E",
 }
 
 
@@ -118,7 +119,7 @@ class NLLBTranslator:
     def __init__(self, model_name: str):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(MODELS_URLS[model_name]).to(
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(MODELS_URLS[model_name], token=os.environ["HF_TOKEN"]).to(
             device
         )
         if torch.cuda.is_available():

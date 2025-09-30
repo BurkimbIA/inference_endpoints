@@ -10,6 +10,9 @@ import time
 from typing import Dict, Any, Optional
 import runpod
 from loguru import logger
+from dotenv import load_dotenv
+
+load_dotenv()
 
 sys.path.append(os.path.dirname(__file__))
 
@@ -21,32 +24,57 @@ from monitoring import (
     record_request_performance,
 )
 
-mistral_model = None
-nllb_model = None
+# Cache des modèles chargés
+loaded_models = {}
 
 
-def load_models():
-    """Load models on cold start to optimize performance"""
-    global mistral_model, nllb_model
+def load_model(model_type: str):
+    """
+    Charge un modèle spécifique à la demande
+    
+    Args:
+        model_type: Type de modèle à charger ("mistral" ou "nllb")
+    
+    Returns:
+        Le modèle chargé
+    """
+    global loaded_models
+
+    hf_token = os.environ.get("HF_TOKEN")
+    if not hf_token or not isinstance(hf_token, str) or not hf_token.strip():
+        raise RuntimeError("Hugging Face token (HF_TOKEN) is required but not found in environment variables.")
+
+    # Vérifier si le modèle est déjà chargé
+    if model_type in loaded_models:
+        logger.info(f"Model {model_type} already loaded, using cached version")
+        return loaded_models[model_type]
 
     try:
-        # Load Mistral model
-        logger.info("Loading Mistral model: burkimbia/BIA-MISTRAL-7B-SACHI")
-        mistral_model = MistralTranslator(model_id="burkimbia/BIA-MISTRAL-7B-SACHI")
-        logger.info("Mistral model loaded successfully")
+        # Map model_type to model key
+        if model_type == "mistral":
+            model_key = "burkimbia/BIA-MISTRAL-7B-SACHI"
+            logger.info(f"Loading Mistral model: {model_key}")
+            model = MistralTranslator(model_id=model_key)
+            logger.info("Mistral model loaded successfully")
 
-        # Load NLLB model
-        logger.info("Loading NLLB model: burkimbia/BIA-NLLB-600M-5E")
-        nllb_model = NLLBTranslator(model_name="burkimbia/BIA-NLLB-600M-5E")
-        logger.info("NLLB model loaded successfully")
+        elif model_type == "nllb":
+            model_key = "burkimbia/BIA-NLLB-600M-5E"
+            logger.info(f"Loading NLLB model: {model_key}")
+            model = NLLBTranslator(model_name=model_key)
+            logger.info("NLLB model loaded successfully")
 
-        # Initialize monitoring with loaded models
-        models = {"mistral": mistral_model, "nllb": nllb_model}
-        initialize_monitoring(models)
-        logger.info("Monitoring initialized successfully")
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+
+        loaded_models[model_type] = model
+
+        initialize_monitoring({model_type: model})
+        logger.info(f"Monitoring initialized for {model_type} model")
+
+        return model
 
     except Exception as e:
-        logger.error(f"Error loading models: {str(e)}")
+        logger.error(f"Error loading {model_type} model: {str(e)}")
         logger.error(traceback.format_exc())
         raise
 
@@ -69,7 +97,6 @@ def validate_translation_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
     if not src_lang or not tgt_lang:
         raise ValueError("Both 'src_lang' and 'tgt_lang' are required")
 
-    # Validate language codes based on model type
     if model_type == "mistral":
         valid_langs = ["fra_Latn", "moor_Latn"]
         if src_lang not in valid_langs or tgt_lang not in valid_langs:
@@ -119,19 +146,15 @@ def translate_text(validated_input: Dict[str, Any]) -> str:
     tgt_lang = validated_input["tgt_lang"]
     generation_params = validated_input["generation_params"]
 
-    if model_type == "mistral":
-        if mistral_model is None:
-            raise RuntimeError("Mistral model not loaded.")
+    model = load_model(model_type)
 
-        return mistral_model.translate(
+    if model_type == "mistral":
+        return model.translate(
             text, src_lang, tgt_lang, max_tokens=generation_params["max_tokens"]
         )
 
     elif model_type == "nllb":
-        if nllb_model is None:
-            raise RuntimeError("NLLB model not loaded.")
-
-        return nllb_model.translate(text, src_lang, tgt_lang, **generation_params)
+        return model.translate(text, src_lang, tgt_lang, **generation_params)
 
 
 def handler(job):
@@ -214,27 +237,7 @@ def handler(job):
         return {"error": f"Internal server error: {str(e)}", "success": False}
 
 
-def health_check():
-    """Health check endpoint to verify models are loaded"""
-
-    status = {
-        "mistral_loaded": mistral_model is not None,
-        "nllb_loaded": nllb_model is not None,
-        "hf_token_configured": os.environ.get("HF_TOKEN") is not None,
-        "status": "healthy",
-    }
-
-    if not status["mistral_loaded"] and not status["nllb_loaded"]:
-        status["status"] = "unhealthy - no models loaded"
-
-    return status
-
-
 if __name__ == "__main__":
-    # Load models on startup
-    logger.info("Loading models...")
-    load_models()
-    logger.info("Models loaded successfully")
-
-    # Start RunPod serverless
+    logger.info("RunPod serverless handler started")
+    logger.info("Models will be loaded on-demand when first requested")
     runpod.serverless.start({"handler": handler})
