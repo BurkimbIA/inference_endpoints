@@ -10,6 +10,13 @@ Deploy and destroy French ↔ Mooré translation endpoints (Mistral, NLLB, Unifi
 - `HF_TOKEN`: Your HuggingFace token
 - `DOCKER_USERNAME`: Docker Hub username
 
+
+### local test 
+```
+docker build -t burkimbia/translation-models .
+docker run --gpus all -p 8080:8080 -e HF_TOKEN=$HF_TOKEN burkimbia/translation-models
+```
+
 ### 2. Deploy an endpoint
 
 Go to GitHub Actions > DEPLOY - RunPod Endpoints > Run workflow
