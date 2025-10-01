@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM pytorch/pytorch:2.2.1-cuda12.1-cudnn8-runtime
 
 RUN apt-get update && apt-get install -y \
@@ -10,35 +11,33 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY requirements.txt .
-
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 COPY requirements.txt .
-
-# Copier le fichier de test pour les tests locaux
 COPY test_input.json ./test_input.json
 
-# Create non-root user for security
-RUN useradd --create-home --shell /bin/bash app
-
-# Create cache directory BEFORE changing ownership
+# Create cache directory
 RUN mkdir -p /app/cache
 
-# Change ownership of everything
-RUN chown -R app:app /app
-
-USER app
-
 # Essential environment variables
-ENV HF_TOKEN=REMOVED_TOKEN
-
-# Cache directories
+ARG HF_TOKEN
+ENV HF_TOKEN=${HF_TOKEN}
 ENV TRANSFORMERS_CACHE=/app/cache
 ENV HF_HOME=/app/cache
 ENV TORCH_HOME=/app/cache
 
-EXPOSE 8000
+# Preload the model BEFORE switching to non-root user
+RUN --mount=type=cache,target=/app/cache,uid=0,gid=0 python -c "from transformers import AutoModelForSeq2SeqLM; \
+    import os; \
+    AutoModelForSeq2SeqLM.from_pretrained('burkimbia/BIA-NLLB-600M-5E', token=os.environ['HF_TOKEN'])"
 
-CMD ["python", "-u", "src/handler.py"]
+RUN useradd --create-home --shell /bin/bash app
+RUN chown -R app:app /app
+
+USER app
+
+EXPOSE 8000
+# CMD ["python", "-u", "src/handler.py", "--rp_serve_api"]
+CMD ["python", "-u", "src/handler.py", "--rp_serve_api", "--rp_api_host", "0.0.0.0"]
