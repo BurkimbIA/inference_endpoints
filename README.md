@@ -13,7 +13,7 @@ Deploy and destroy French ↔ Mooré translation endpoints (Mistral, NLLB, Unifi
 
 ### local test 
 ```
-docker build -t burkimbia/translation-models .
+DOCKER_BUILDKIT=1 docker build --build-arg HF_TOKEN=$HF_TOKEN$ -t burkimbia/translation-models .
 docker run --gpus all -p 8080:8080 -e HF_TOKEN=$HF_TOKEN burkimbia/translation-models
 ```
 
