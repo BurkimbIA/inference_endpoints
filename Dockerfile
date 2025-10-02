@@ -39,5 +39,5 @@ RUN chown -R app:app /app
 USER app
 
 EXPOSE 8000
-# CMD ["python", "-u", "src/handler.py", "--rp_serve_api"]
-CMD ["python", "-u", "src/handler.py", "--rp_serve_api", "--rp_api_host", "0.0.0.0"]
+CMD ["python", "-u", "src/handler.py", "--rp_serve_api"]
+# CMD ["python", "-u", "src/handler.py", "--rp_serve_api", "--rp_api_host", "0.0.0.0"] local
