@@ -38,7 +38,7 @@ def load_model(model_type: str):
     Returns:
         Le modèle chargé
     """
-    global loaded_models
+    # global loaded_models (removed: not needed)
 
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token or not isinstance(hf_token, str) or not hf_token.strip():
