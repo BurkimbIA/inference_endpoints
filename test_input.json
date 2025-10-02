@@ -1,0 +1,9 @@
+{
+  "input": {
+    "text": "Hello, how are you?",
+    "model_type": "nllb",
+    "src_lang": "en_Latn",
+    "tgt_lang": "moor_Latn",
+    "num_beams": 5
+  }
+}
