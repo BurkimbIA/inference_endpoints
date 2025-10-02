@@ -139,6 +139,8 @@ jobs:
         cache-to: type=gha,mode=max
         build-args: |
           BUILDKIT_INLINE_CACHE=1
+          HF_TOKEN=${{ secrets.HF_TOKEN }}
+          RUNPOD_API_KEY=${{ secrets.RUNPOD_API_KEY }}
     
     - name: Calculate build time
       id: timing
