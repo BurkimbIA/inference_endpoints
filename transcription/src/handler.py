@@ -174,9 +174,6 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("Starting Transcription Service with HuggingFace Whisper")
     logger.info("=" * 60)
-    logger.info(f"Available models: {ASR_MODELS}")
-    logger.info("Service follows HuggingFace best practices for Whisper models")
-    logger.info("=" * 60)
     
     # Start RunPod serverless worker
     runpod.serverless.start({
