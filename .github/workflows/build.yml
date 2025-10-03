@@ -139,9 +139,11 @@ jobs:
   build:
     name: Build ${{ matrix.service }} Service
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [prepare, test]
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && needs.prepare.outputs.services != '[]'
     strategy:
+      fail-fast: false
       matrix:
         service: ${{ fromJson(needs.prepare.outputs.services) }}
     
@@ -149,12 +151,27 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
+    - name: Free up disk space
+      run: |
+        echo "Disk space before cleanup:"
+        df -h
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
+        echo "Disk space after cleanup:"
+        df -h
+    
     - name: Start build timer
       id: start-time
       run: echo "start-time=$(date +%s)" >> $GITHUB_OUTPUT
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+      with:
+        install: true
+        buildkitd-flags: --debug
     
     - name: Log in to Docker Hub
       if: github.event.inputs.push_image != 'false'
@@ -221,6 +238,7 @@ jobs:
     - name: Build Docker image
       id: build
       uses: docker/build-push-action@v5
+      timeout-minutes: 45
       with:
         context: ${{ steps.config.outputs.build-context }}
         platforms: linux/amd64
@@ -229,6 +247,7 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha,scope=${{ matrix.service }}
         cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+        outputs: type=image,push=${{ github.event.inputs.push_image != 'false' }}
         build-args: |
           BUILDKIT_INLINE_CACHE=1
           HF_TOKEN=${{ secrets.HF_TOKEN }}
