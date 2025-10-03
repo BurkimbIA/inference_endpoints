@@ -145,10 +145,6 @@ jobs:
       matrix:
         service: ${{ fromJson(needs.prepare.outputs.services) }}
     
-    outputs:
-      image-digest-${{ matrix.service }}: ${{ steps.build.outputs.digest }}
-      build-time-${{ matrix.service }}: ${{ steps.timing.outputs.build-time }}
-    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
