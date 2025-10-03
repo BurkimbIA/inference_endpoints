@@ -1,8 +1,8 @@
 {
   "input": {
-    "audio_url": "https://example.com/sample_audio.wav",
+    "audio_url": "https://github.com/BurkimbIA/inference_endpoints/blob/main/assets/default.wav",
     "model": "burkimbia/BIA-WHISPER-LARGE-SACHI_V2",
-    "language": "moor",
+    "language": "hau",
     "return_timestamps": false,
     "save_to_dataset": false
   }

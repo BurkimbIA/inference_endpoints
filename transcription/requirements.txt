@@ -5,6 +5,6 @@ torch
 Werkzeug
 Pillow
 spaces
-Cython
+# Cython
 resemble-enhance
 loguru
