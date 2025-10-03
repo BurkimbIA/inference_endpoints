@@ -19,17 +19,7 @@ WORKDIR /app
 # Install Python dependencies first (better caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install  -r requirements.txt
-    # pip install --no-cache-dir -r requirements.txt
-
-# Clone and cache the model during build (BEST PRACTICE for RunPod)
-# This embeds the model in the Docker image for fastest loading
-ARG HF_TOKEN
-RUN git clone https://burkimbia:${HF_TOKEN}@huggingface.co/burkimbia/BIA-WHISPER-LARGE-SACHI_V2 /app/models/BIA-WHISPER-LARGE-SACHI_V2 && \
-    cd /app/models/BIA-WHISPER-LARGE-SACHI_V2 && \
-    git lfs pull && \
-    # Remove git history to reduce image size
-    rm -rf /app/models/BIA-WHISPER-LARGE-SACHI_V2/.git
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY src/ ./src/
@@ -41,9 +31,8 @@ RUN useradd --create-home --shell /bin/bash app && \
 
 USER app
 
-# Set environment variable for extended cold start timeout (if needed)
-# Uncomment and adjust if your model loading takes >7 minutes
-# ENV RUNPOD_INIT_TIMEOUT=800
+# Set environment variable for extended cold start timeout
+ENV RUNPOD_INIT_TIMEOUT=800
 
 EXPOSE 8000
 

@@ -1,39 +1,40 @@
-# Transcription Service
+# 🎤 Audio Transcription Service
 
-This service provides audio transcription capabilities using Whisper and other ASR models.
+Un service d'inférence simple et efficace pour la transcription audio utilisant les modèles Whisper.
 
-## Models
+## 🚀 Fonctionnalités
 
-### Whisper Fine-tuned for Mooré
-- **Model**: `burkimbia/BIA-WHISPER-LARGE-SACHI_V2`
-- **Location**: Pre-loaded in Docker image at `/app/models/BIA-WHISPER-LARGE-SACHI_V2`
-- **Use case**: Speech-to-text for Mooré language and multilingual audio
+- Transcription audio en temps réel
+- Support de fichiers audio via URL ou base64
+- Modèles Whisper optimisés pour les langues locales
+- API simple et rapide
+- Traitement par lots (batch)
+- Health check intégré
 
-## Features
+## 🤖 Modèles
 
-- **Audio Transcription**: Convert audio files to text
-- **Batch Processing**: Transcribe multiple audio files at once
-- **Dataset Management**: Save transcriptions to Hugging Face datasets
-- **Multiple Input Formats**: Support for URLs and base64 encoded audio
-- **Timestamp Support**: Optional word-level timestamps
-- **Language Detection**: Automatic or manual language specification
+### Whisper Fine-tuned pour Mooré
+- **Modèle**: `burkimbia/BIA-WHISPER-LARGE-SACHI_V2`
+- **Usage**: Transcription automatique pour le Mooré et autres langues
 
-## Building the Docker Image
+## 🛠️ Installation et Utilisation
+
+### Construction de l'image Docker
 
 ```bash
 cd transcription/
 docker build --build-arg HF_TOKEN=$HF_TOKEN -t burkimbia/transcription-service .
 ```
 
-## Running the Service
+### Lancement du service
 
 ```bash
 docker run -p 8000:8000 -e HF_TOKEN=$HF_TOKEN burkimbia/transcription-service
 ```
 
-## API Usage
+## 📋 API
 
-### Single Audio Transcription
+### Transcription Simple
 
 ```json
 {
@@ -41,13 +42,12 @@ docker run -p 8000:8000 -e HF_TOKEN=$HF_TOKEN burkimbia/transcription-service
     "audio_url": "https://example.com/audio.wav",
     "model": "burkimbia/BIA-WHISPER-LARGE-SACHI_V2",
     "language": "moor",
-    "return_timestamps": false,
-    "save_to_dataset": false
+    "return_timestamps": false
   }
 }
 ```
 
-### Batch Audio Transcription
+### Transcription par Lots
 
 ```json
 {
@@ -62,7 +62,7 @@ docker run -p 8000:8000 -e HF_TOKEN=$HF_TOKEN burkimbia/transcription-service
 }
 ```
 
-### Base64 Audio Input
+### Audio en Base64
 
 ```json
 {
@@ -74,14 +74,14 @@ docker run -p 8000:8000 -e HF_TOKEN=$HF_TOKEN burkimbia/transcription-service
 }
 ```
 
-## Response Format
+## 📤 Format de Réponse
 
 ```json
 {
-  "text": "Transcribed text content",
+  "text": "Texte transcrit",
   "chunks": [
     {
-      "text": "word",
+      "text": "mot",
       "timestamp": [0.0, 1.0]
     }
   ],
@@ -90,3 +90,25 @@ docker run -p 8000:8000 -e HF_TOKEN=$HF_TOKEN burkimbia/transcription-service
   "success": true
 }
 ```
+
+## 📁 Structure Simplifiée
+
+```
+transcription/
+├── src/
+│   ├── handler.py          # Handlers RunPod
+│   ├── inferences.py       # Logique de transcription
+│   └── utils.py           # Utilitaires audio
+├── requirements.txt        # Dépendances minimales
+├── Dockerfile             # Image Docker
+└── README.md             # Documentation
+```
+
+## ✨ Optimisations
+
+Ce service est maintenant optimisé pour l'inférence pure :
+- ✅ Code minimal et maintenable
+- ✅ Pas de sauvegarde de dataset
+- ✅ Focus sur la performance
+- ✅ Dépendances réduites
+- ✅ Démarrage plus rapide
