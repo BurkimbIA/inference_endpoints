@@ -48,6 +48,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for accurate diff
       
     - name: Determine services to build
       id: matrix
@@ -61,27 +63,50 @@ jobs:
           SERVICES='["translation", "transcription", "speech"]'
           echo "Manual build: all services"
         else
-          # Auto-detect changes
+          # Auto-detect changes based on folder modifications
           if [ "${{ github.event_name }}" = "push" ]; then
-            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "all")
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
           else
-            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "all")
+            # For pull requests
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
           fi
           
-          echo "Changed files: $CHANGED_FILES"
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
           
+          # Initialize empty array
           SERVICES="[]"
-          if echo "$CHANGED_FILES" | grep -q "translation/" || echo "$CHANGED_FILES" | grep -q "^src/" || [ "$CHANGED_FILES" = "all" ]; then
+          
+          # Build translation if translation/ folder has changes
+          if echo "$CHANGED_FILES" | grep -q "^translation/"; then
             SERVICES=$(echo "$SERVICES" | jq -c '. + ["translation"]')
-          fi
-          if echo "$CHANGED_FILES" | grep -q "transcription/" || [ "$CHANGED_FILES" = "all" ]; then
-            SERVICES=$(echo "$SERVICES" | jq -c '. + ["transcription"]')
-          fi
-          if echo "$CHANGED_FILES" | grep -q "speech/" || [ "$CHANGED_FILES" = "all" ]; then
-            SERVICES=$(echo "$SERVICES" | jq -c '. + ["speech"]')
+            echo "✅ Translation service will be built (changes detected in translation/ folder)"
           fi
           
-          echo "Auto-detected services: $SERVICES"
+          # Build transcription if transcription/ folder has changes
+          if echo "$CHANGED_FILES" | grep -q "^transcription/"; then
+            SERVICES=$(echo "$SERVICES" | jq -c '. + ["transcription"]')
+            echo "✅ Transcription service will be built (changes detected in transcription/ folder)"
+          fi
+          
+          # Build speech if speech/ folder has changes
+          if echo "$CHANGED_FILES" | grep -q "^speech/"; then
+            SERVICES=$(echo "$SERVICES" | jq -c '. + ["speech"]')
+            echo "✅ Speech service will be built (changes detected in speech/ folder)"
+          fi
+          
+          # If no services detected and there are changes, build nothing
+          if [ "$SERVICES" = "[]" ] && [ -n "$CHANGED_FILES" ]; then
+            echo "ℹ️ No service folders modified - skipping builds"
+          fi
+          
+          # If no changes detected at all (shouldn't happen but just in case)
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "⚠️ Could not detect changes - building all services as fallback"
+            SERVICES='["translation", "transcription", "speech"]'
+          fi
+          
+          echo "Final services to build: $SERVICES"
         fi
         
         echo "services=$SERVICES" >> $GITHUB_OUTPUT
@@ -114,26 +139,17 @@ jobs:
         if [ -d "${{ matrix.service }}/src" ]; then
           flake8 ${{ matrix.service }}/src --count --select=E9,F63,F7,F82 --show-source --statistics
         fi
-        if [ -d "src" ] && [ "${{ matrix.service }}" = "translation" ]; then
-          flake8 src --count --select=E9,F63,F7,F82 --show-source --statistics
-        fi
 
     - name: Auto-format service code
       run: |
         if [ -d "${{ matrix.service }}/src" ]; then
           black ${{ matrix.service }}/src
         fi
-        if [ -d "src" ] && [ "${{ matrix.service }}" = "translation" ]; then
-          black src
-        fi
 
     - name: Basic syntax check
       run: |
         if [ -d "${{ matrix.service }}/src" ]; then
           find ${{ matrix.service }}/src -name "*.py" -exec python -m py_compile {} \;
-        fi
-        if [ -d "src" ] && [ "${{ matrix.service }}" = "translation" ]; then
-          find src -name "*.py" -exec python -m py_compile {} \;
         fi
 
   build:
@@ -202,18 +218,7 @@ jobs:
       run: |
         SERVICE="${{ matrix.service }}"
         IMAGE_NAME="${{ env.DOCKER_USERNAME }}/${SERVICE}-service"
-        
-        # Determine build context
-        if [ "$SERVICE" = "translation" ]; then
-          # Translation can use root context (backward compatibility) or service context
-          if [ -f "translation/Dockerfile" ]; then
-            BUILD_CONTEXT="translation"
-          else
-            BUILD_CONTEXT="."
-          fi
-        else
-          BUILD_CONTEXT="$SERVICE"
-        fi
+        BUILD_CONTEXT="$SERVICE"
         
         echo "image-name=$IMAGE_NAME" >> $GITHUB_OUTPUT
         echo "build-context=$BUILD_CONTEXT" >> $GITHUB_OUTPUT
@@ -245,8 +250,10 @@ jobs:
         push: ${{ github.event.inputs.push_image != 'false' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha,scope=${{ matrix.service }}
-        cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+        cache-from: |
+          type=gha,scope=${{ matrix.service }}
+          type=registry,ref=${{ env.REGISTRY }}/${{ steps.config.outputs.image-name }}:cache
+        cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=min,scope=' || '' }}${{ github.event_name != 'pull_request' && matrix.service || '' }}
         outputs: type=image,push=${{ github.event.inputs.push_image != 'false' }}
         build-args: |
           BUILDKIT_INLINE_CACHE=1
