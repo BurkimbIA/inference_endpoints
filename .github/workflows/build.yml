@@ -2,18 +2,7 @@ name: BUILD - Multi-Service Docker Images
 
 on:
   push:
-    branches:          SERVICES="[]"
-          if echo "$CHANGED_FILES" | grep -q "translation/" || echo "$CHANGED_FILES" | grep -q "^src/" || [ "$CHANGED_FILES" = "all" ]; then
-            SERVICES=$(echo "$SERVICES" | jq -c '. + ["translation"]')
-          fi
-          if echo "$CHANGED_FILES" | grep -q "transcription/" || [ "$CHANGED_FILES" = "all" ]; then
-            SERVICES=$(echo "$SERVICES" | jq -c '. + ["transcription"]')
-          fi
-          if echo "$CHANGED_FILES" | grep -q "speech/" || [ "$CHANGED_FILES" = "all" ]; then
-            SERVICES=$(echo "$SERVICES" | jq -c '. + ["speech"]')
-          fi
-          
-          echo "Auto-detected services: $SERVICES"lop]
+    branches: [main, develop]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -83,16 +72,16 @@ jobs:
           
           SERVICES="[]"
           if echo "$CHANGED_FILES" | grep -q "translation/" || echo "$CHANGED_FILES" | grep -q "^src/" || [ "$CHANGED_FILES" = "all" ]; then
-            SERVICES=$(echo "$SERVICES" | jq '. + ["translation"]')
+            SERVICES=$(echo "$SERVICES" | jq -c '. + ["translation"]')
           fi
           if echo "$CHANGED_FILES" | grep -q "transcription/" || [ "$CHANGED_FILES" = "all" ]; then
-            SERVICES=$(echo "$SERVICES" | jq '. + ["transcription"]')
+            SERVICES=$(echo "$SERVICES" | jq -c '. + ["transcription"]')
           fi
           if echo "$CHANGED_FILES" | grep -q "speech/" || [ "$CHANGED_FILES" = "all" ]; then
-            SERVICES=$(echo "$SERVICES" | jq '. + ["speech"]')
+            SERVICES=$(echo "$SERVICES" | jq -c '. + ["speech"]')
           fi
           
-          echo "� Auto-detected services: $SERVICES"
+          echo "Auto-detected services: $SERVICES"
         fi
         
         echo "services=$SERVICES" >> $GITHUB_OUTPUT
