@@ -1,3 +1,5 @@
+# Ignore model directory
+BIA-NLLB-600M-5E/
 # Docker
 .dockerignore
 

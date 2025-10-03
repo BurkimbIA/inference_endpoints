@@ -216,22 +216,8 @@ class HealthChecker:
         return checks
 
     def _check_environment(self) -> Dict[str, Any]:
-        """Check required environment variables"""
-        checks = {"healthy": True, "details": {}}
-
-        required_vars = ["HF_TOKEN"]
-        for var in required_vars:
-            value = os.environ.get(var)
-            checks["details"][var] = {
-                "configured": value is not None,
-                "length": len(value) if value else 0,
-            }
-
-            if not value:
-                checks["healthy"] = False
-                checks["details"][var]["error"] = "Environment variable not set"
-
-        return checks
+        """No required environment variables anymore"""
+        return {"healthy": True, "details": {}}
 
     def _check_disk_space(self) -> Dict[str, Any]:
         """Check available disk space"""

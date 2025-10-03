@@ -1,4 +1,4 @@
-name: BUILD - Docker Image
+name: BUILD - Multi-Service Docker Images
 
 on:
   push:
@@ -7,6 +7,16 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      service:
+        description: 'Service to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - translation
+          - transcription
+          - speech
       image_tag:
         description: 'Docker image tag to build'
         required: false
@@ -25,13 +35,65 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/translation-models
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
 
 jobs:
+  # Determine which services to build
+  prepare:
+    name: Determine Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.matrix.outputs.services }}
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Determine services to build
+      id: matrix
+      run: |
+        if [ "${{ github.event.inputs.service }}" != "" ] && [ "${{ github.event.inputs.service }}" != "all" ]; then
+          # Manual selection
+          SERVICES='["${{ github.event.inputs.service }}"]'
+          echo "🎯 Manual build: ${{ github.event.inputs.service }}"
+        elif [ "${{ github.event.inputs.service }}" = "all" ]; then
+          # Force all
+          SERVICES='["translation", "transcription", "speech"]'
+          echo "🚀 Manual build: all services"
+        else
+          # Auto-detect changes
+          if [ "${{ github.event_name }}" = "push" ]; then
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "all")
+          else
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "all")
+          fi
+          
+          echo "Changed files: $CHANGED_FILES"
+          
+          SERVICES="[]"
+          if echo "$CHANGED_FILES" | grep -q "translation/" || echo "$CHANGED_FILES" | grep -q "^src/" || [ "$CHANGED_FILES" = "all" ]; then
+            SERVICES=$(echo "$SERVICES" | jq '. + ["translation"]')
+          fi
+          if echo "$CHANGED_FILES" | grep -q "transcription/" || [ "$CHANGED_FILES" = "all" ]; then
+            SERVICES=$(echo "$SERVICES" | jq '. + ["transcription"]')
+          fi
+          if echo "$CHANGED_FILES" | grep -q "speech/" || [ "$CHANGED_FILES" = "all" ]; then
+            SERVICES=$(echo "$SERVICES" | jq '. + ["speech"]')
+          fi
+          
+          echo "� Auto-detected services: $SERVICES"
+        fi
+        
+        echo "services=$SERVICES" >> $GITHUB_OUTPUT
+
   test:
     name: Pre-Build Tests
     runs-on: ubuntu-latest
-    if: github.event.inputs.test_build != 'false'
+    needs: [prepare]
+    if: github.event.inputs.test_build != 'false' && needs.prepare.outputs.services != '[]'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
     
     steps:
     - name: Checkout repository
@@ -47,29 +109,45 @@ jobs:
         python -m pip install --upgrade pip
         pip install flake8 black
 
-    - name: Lint with flake8
+    - name: Lint service code
       run: |
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        if [ -d "${{ matrix.service }}/src" ]; then
+          flake8 ${{ matrix.service }}/src --count --select=E9,F63,F7,F82 --show-source --statistics
+        fi
+        if [ -d "src" ] && [ "${{ matrix.service }}" = "translation" ]; then
+          flake8 src --count --select=E9,F63,F7,F82 --show-source --statistics
+        fi
 
-    - name: Auto-format with black
+    - name: Auto-format service code
       run: |
-        black .
+        if [ -d "${{ matrix.service }}/src" ]; then
+          black ${{ matrix.service }}/src
+        fi
+        if [ -d "src" ] && [ "${{ matrix.service }}" = "translation" ]; then
+          black src
+        fi
 
     - name: Basic syntax check
       run: |
-        python -m py_compile src/handler.py
-        python -m py_compile src/inferences.py
-        python -m py_compile src/monitoring.py
+        if [ -d "${{ matrix.service }}/src" ]; then
+          find ${{ matrix.service }}/src -name "*.py" -exec python -m py_compile {} \;
+        fi
+        if [ -d "src" ] && [ "${{ matrix.service }}" = "translation" ]; then
+          find src -name "*.py" -exec python -m py_compile {} \;
+        fi
 
   build:
-    name: Build Docker Image
+    name: Build ${{ matrix.service }} Service
     runs-on: ubuntu-latest
-    needs: [test]
-    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    needs: [prepare, test]
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && needs.prepare.outputs.services != '[]'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
     
     outputs:
-      image-digest: ${{ steps.build.outputs.digest }}
-      build-time: ${{ steps.timing.outputs.build-time }}
+      image-digest-${{ matrix.service }}: ${{ steps.build.outputs.digest }}
+      build-time-${{ matrix.service }}: ${{ steps.timing.outputs.build-time }}
     
     steps:
     - name: Checkout repository
@@ -97,12 +175,10 @@ jobs:
         
         if [ -z "$DOCKER_USERNAME" ]; then
           echo "❌ DOCKER_USERNAME secret est vide ou non défini"
-          echo "Vérifiez dans Settings > Secrets and variables > Actions"
           exit 1
         fi
         if [ -z "$DOCKER_PASSWORD" ]; then
           echo "❌ DOCKER_PASSWORD secret est vide ou non défini"
-          echo "Vérifiez dans Settings > Secrets and variables > Actions"
           exit 1
         fi
         
@@ -111,11 +187,34 @@ jobs:
         echo "Connexion à Docker Hub..."
         echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
     
+    - name: Set image name and context
+      id: config
+      run: |
+        SERVICE="${{ matrix.service }}"
+        IMAGE_NAME="${{ env.DOCKER_USERNAME }}/${SERVICE}-service"
+        
+        # Determine build context
+        if [ "$SERVICE" = "translation" ]; then
+          # Translation can use root context (backward compatibility) or service context
+          if [ -f "translation/Dockerfile" ]; then
+            BUILD_CONTEXT="translation"
+          else
+            BUILD_CONTEXT="."
+          fi
+        else
+          BUILD_CONTEXT="$SERVICE"
+        fi
+        
+        echo "image-name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+        echo "build-context=$BUILD_CONTEXT" >> $GITHUB_OUTPUT
+        echo "Building $SERVICE service with image: $IMAGE_NAME"
+        echo "Build context: $BUILD_CONTEXT"
+    
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        images: ${{ env.REGISTRY }}/${{ steps.config.outputs.image-name }}
         tags: |
           type=ref,event=branch
           type=ref,event=pr
@@ -123,20 +222,20 @@ jobs:
           type=raw,value=${{ github.event.inputs.image_tag || 'latest' }},enable={{is_default_branch}}
           type=raw,value=run-${{ github.run_number }}
         labels: |
-          org.opencontainers.image.title=Translation Models API
-          org.opencontainers.image.description=Docker image for AI moore translation models
+          org.opencontainers.image.title=${{ matrix.service }} Service
+          org.opencontainers.image.description=Docker image for ${{ matrix.service }} AI service
     
     - name: Build Docker image
       id: build
       uses: docker/build-push-action@v5
       with:
-        context: .
+        context: ${{ steps.config.outputs.build-context }}
         platforms: linux/amd64
         push: ${{ github.event.inputs.push_image != 'false' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=${{ matrix.service }}
+        cache-to: type=gha,mode=max,scope=${{ matrix.service }}
         build-args: |
           BUILDKIT_INLINE_CACHE=1
           HF_TOKEN=${{ secrets.HF_TOKEN }}
@@ -151,25 +250,27 @@ jobs:
         echo "build-time=${build_time}" >> $GITHUB_OUTPUT
         echo "Build completed in ${build_time} seconds"
 
-
   cleanup:
     name: Cleanup Old Docker Images
     runs-on: ubuntu-latest
-    needs: [build]
-    if: needs.build.result == 'success' && github.event_name == 'push'
+    needs: [prepare, build]
+    if: needs.build.result == 'success' && github.event_name == 'push' && needs.prepare.outputs.services != '[]'
     continue-on-error: true
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
     
     steps:
-    - name: Delete old Docker Hub images
+    - name: Delete old Docker Hub images for ${{ matrix.service }}
       run: |
-        echo "Cleaning up old Docker images (keeping latest 5)..."
+        echo "Cleaning up old ${{ matrix.service }} Docker images (keeping latest 3)..."
         
         # Get list of tags from Docker Hub API
-        REPO="${{ secrets.DOCKER_USERNAME }}/translation-models"
-        TOKEN=$(curl -s -H "Content-Type: application/json" -X POST -d '{"username": "${{ secrets.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}' https://hub.docker.com/v2/users/login/ | jq -r .token)
+        REPO="${{ env.DOCKER_USERNAME }}/${{ matrix.service }}-service"
+        TOKEN=$(curl -s -H "Content-Type: application/json" -X POST -d '{"username": "${{ env.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}' https://hub.docker.com/v2/users/login/ | jq -r .token)
         
         # Get all tags (excluding latest, main)
-        TAGS=$(curl -s -H "Authorization: JWT ${TOKEN}" "https://hub.docker.com/v2/repositories/${REPO}/tags/?page_size=100" | jq -r '.results[] | select(.name != "latest" and .name != "main" and (.name | startswith("run-"))) | .name' | sort -V | head -n -5)
+        TAGS=$(curl -s -H "Authorization: JWT ${TOKEN}" "https://hub.docker.com/v2/repositories/${REPO}/tags/?page_size=100" | jq -r '.results[] | select(.name != "latest" and .name != "main" and (.name | startswith("run-"))) | .name' | sort -V | head -n -3)
         
         # Delete old tags
         for tag in $TAGS; do
@@ -177,4 +278,4 @@ jobs:
           curl -s -X DELETE -H "Authorization: JWT ${TOKEN}" "https://hub.docker.com/v2/repositories/${REPO}/tags/${tag}/" || echo "Failed to delete $tag"
         done
         
-        echo "Cleanup completed - kept latest 5 images"
+        echo "Cleanup completed for ${{ matrix.service }} - kept latest 3 images"

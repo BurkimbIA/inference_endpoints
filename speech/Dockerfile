@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y \
     git \
     git-lfs \
     curl \
+    ffmpeg \
+    espeak-ng \
+    espeak-ng-data \
     && rm -rf /var/lib/apt/lists/*
 
 # Initialize git lfs
@@ -19,31 +22,24 @@ WORKDIR /app
 # Install Python dependencies first (better caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install  -r requirements.txt
-    # pip install --no-cache-dir -r requirements.txt
+    pip install -r requirements.txt
 
-# Clone and cache the model during build (BEST PRACTICE for RunPod)
-# This embeds the model in the Docker image for fastest loading
+# Clone and cache speech synthesis models during build
+# TODO: Add specific TTS models (e.g., Coqui TTS, XTTS, Bark)
 ARG HF_TOKEN
-RUN git clone https://burkimbia:${HF_TOKEN}@huggingface.co/burkimbia/BIA-NLLB-600M-5E /app/models/BIA-NLLB-600M-5E && \
-    cd /app/models/BIA-NLLB-600M-5E && \
-    git lfs pull && \
-    # Remove git history to reduce image size
-    rm -rf /app/models/BIA-NLLB-600M-5E/.git
+# RUN git clone https://burkimbia:${HF_TOKEN}@huggingface.co/burkimbia/YOUR-TTS-MODEL /app/models/YOUR-TTS-MODEL && \
+#     cd /app/models/YOUR-TTS-MODEL && \
+#     git lfs pull && \
+#     rm -rf /app/models/YOUR-TTS-MODEL/.git
 
 # Copy application code
 COPY src/ ./src/
-COPY test_input.json ./test_input.json
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash app && \
     chown -R app:app /app
 
 USER app
-
-# Set environment variable for extended cold start timeout (if needed)
-# Uncomment and adjust if your model loading takes >7 minutes
-# ENV RUNPOD_INIT_TIMEOUT=800
 
 EXPOSE 8000
 

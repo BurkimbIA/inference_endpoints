@@ -25,11 +25,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Clone and cache the model during build (BEST PRACTICE for RunPod)
 # This embeds the model in the Docker image for fastest loading
 ARG HF_TOKEN
-RUN git clone https://burkimbia:${HF_TOKEN}@huggingface.co/burkimbia/BIA-NLLB-600M-5E /app/models/BIA-NLLB-600M-5E && \
-    cd /app/models/BIA-NLLB-600M-5E && \
+RUN git clone https://burkimbia:${HF_TOKEN}@huggingface.co/burkimbia/BIA-WHISPER-LARGE-SACHI_V2 /app/models/BIA-WHISPER-LARGE-SACHI_V2 && \
+    cd /app/models/BIA-WHISPER-LARGE-SACHI_V2 && \
     git lfs pull && \
     # Remove git history to reduce image size
-    rm -rf /app/models/BIA-NLLB-600M-5E/.git
+    rm -rf /app/models/BIA-WHISPER-LARGE-SACHI_V2/.git
 
 # Copy application code
 COPY src/ ./src/

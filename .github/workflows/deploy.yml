@@ -1,30 +1,33 @@
-name: DEPLOY - RunPod Endpoints
+name: DEPLOY - RunPod AI Services
 
 on:
   workflow_dispatch:
     inputs:
-      model_type:
-        description: 'Model to deploy'
+      service:
+        description: 'Service to deploy'
         required: true
-        default: 'unified_endpoint'
+        default: 'translation_endpoint'
         type: choice
         options:
+          - translation_endpoint
+          - transcription_endpoint
+          - speech_endpoint
           - mistral_endpoint
           - nllb_endpoint
           - unified_endpoint
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/translation-models
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
 
 jobs:
   deploy:
-    name: Deploy ${{ matrix.model_type }}
+    name: Deploy ${{ matrix.service }}
     runs-on: ubuntu-latest
     
     strategy:
       fail-fast: false
       matrix:
-        model_type: ${{ fromJson(format('["{0}"]', github.event.inputs.model_type)) }}
+        service: ${{ fromJson(format('["{0}"]', github.event.inputs.service)) }}
     
     steps:
     - name: Checkout
@@ -42,8 +45,8 @@ jobs:
       env:
         RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        MODEL_TYPE: ${{ matrix.model_type }}
-        IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        SERVICE_TYPE: ${{ matrix.service }}
+        DOCKER_USERNAME: ${{ env.DOCKER_USERNAME }}
       run: |
         python3 << 'EOF'
         import os
@@ -55,14 +58,14 @@ jobs:
         with open('runpod-config.json', 'r') as f:
             config = json.load(f)
         
-        model_type = os.environ['MODEL_TYPE']
-        endpoint_config = config[model_type]
+        service_type = os.environ['SERVICE_TYPE']
+        endpoint_config = config[service_type]
         template_config = config['template_config']
         
         # Setup
         api_key = os.environ['RUNPOD_API_KEY']
         hf_token = os.environ['HF_TOKEN']
-        image_name = os.environ['IMAGE_NAME']
+        docker_username = os.environ['DOCKER_USERNAME']
         
         headers = {
             'Authorization': f'Bearer {api_key}',
@@ -79,10 +82,20 @@ jobs:
         min_workers = endpoint_config['scaling']['min_workers']
         max_workers = endpoint_config['scaling']['max_workers']
         
-        template_name = f"burkimbia-translation-{model_type_name}-template"
-        target_image = f"{image_name}:latest"
+        # Determine image name
+        if 'image' in endpoint_config:
+            target_image = endpoint_config['image'].replace('sawalle', docker_username)
+        else:
+            # Fallback for backward compatibility
+            if service_type in ['mistral_endpoint', 'nllb_endpoint', 'unified_endpoint']:
+                target_image = f"docker.io/{docker_username}/translation-service:latest"
+            else:
+                service_name = service_type.replace('_endpoint', '')
+                target_image = f"docker.io/{docker_username}/{service_name}-service:latest"
         
-        print(f"Deploying {endpoint_name} (model: {model_type_name})")
+        template_name = f"burkimbia-{model_type_name}-template"
+        
+        print(f"Deploying {endpoint_name} (service: {model_type_name})")
         print(f"GPU Type: {gpu_types}")
         print(f"Image: {target_image}")
         
@@ -110,7 +123,8 @@ jobs:
                     "volumeMountPath": "/runpod-volume",
                     "env": {
                         "HF_TOKEN": hf_token,
-                        "MODEL_TYPE": model_type_name
+                        "MODEL_TYPE": model_type_name,
+                        **endpoint_config.get('env', {})
                     }
                 }
                 
@@ -176,6 +190,8 @@ jobs:
             if endpoint_id:
                 print(f"✅ Endpoint deployed: {endpoint_id}")
                 print(f"🌐 URL: https://api.runpod.ai/v1/{endpoint_id}/run")
+                print(f"📊 Service: {model_type_name}")
+                print(f"🖼️  Image: {target_image}")
             else:
                 print(f"❌ Deploy failed: {endpoint_result}")
                 sys.exit(1)

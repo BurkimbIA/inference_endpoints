@@ -1,0 +1,9 @@
+{
+  "input": {
+    "audio_url": "https://example.com/sample_audio.wav",
+    "model": "burkimbia/BIA-WHISPER-LARGE-SACHI_V2",
+    "language": "moor",
+    "return_timestamps": false,
+    "save_to_dataset": false
+  }
+}

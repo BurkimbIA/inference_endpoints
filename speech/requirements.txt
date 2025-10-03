@@ -1,0 +1,26 @@
+# Speech Synthesis Service Requirements
+# Core ML libraries
+torch>=2.0.0
+transformers>=4.30.0
+datasets>=2.10.0
+
+# Audio processing
+librosa>=0.10.0
+soundfile>=0.12.0
+pydub>=0.25.0
+
+# TTS specific libraries
+TTS>=0.22.0
+coqui-ai-tts>=0.22.0
+phonemizer>=3.2.0
+
+# FastAPI for API
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# Hugging Face
+huggingface_hub>=0.16.0
+
+# Utils
+numpy>=1.24.0
+scipy>=1.10.0

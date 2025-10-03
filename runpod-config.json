@@ -1,38 +1,103 @@
 {
   "template_config": {
-    "name": "burkimbia-translation-models-template",
-    "image": "docker.io/sawalle/translation-models:latest",
-  "container_disk_size": 32,
-  "volume_size": 8
+    "name": "burkimbia-ai-services-template",
+    "container_disk_size": 32,
+    "volume_size": 8
+  },
+  "translation_endpoint": {
+    "endpoint_name": "burkimbia-translation-service",
+    "model_type": "translation",
+    "image": "docker.io/sawalle/translation-service:latest",
+    "gpu_types": ["NVIDIA A40"],
+    "idle_timeout": 600,
+    "env": {
+      "RUNPOD_INIT_TIMEOUT": 800
+    },
+    "scaling": {
+      "min_workers": 1,
+      "max_workers": 3,
+      "queue_delay": 2,
+      "request_count": 2
+    }
+  },
+  "transcription_endpoint": {
+    "endpoint_name": "burkimbia-transcription-service",
+    "model_type": "transcription", 
+    "image": "docker.io/sawalle/transcription-service:latest",
+    "gpu_types": ["NVIDIA A40"],
+    "idle_timeout": 600,
+    "env": {
+      "RUNPOD_INIT_TIMEOUT": 900
+    },
+    "scaling": {
+      "min_workers": 1,
+      "max_workers": 2,
+      "queue_delay": 3,
+      "request_count": 1
+    }
+  },
+  "speech_endpoint": {
+    "endpoint_name": "burkimbia-speech-service",
+    "model_type": "speech",
+    "image": "docker.io/sawalle/speech-service:latest", 
+    "gpu_types": ["NVIDIA A40"],
+    "idle_timeout": 600,
+    "env": {
+      "RUNPOD_INIT_TIMEOUT": 800
+    },
+    "scaling": {
+      "min_workers": 1,
+      "max_workers": 2,
+      "queue_delay": 2,
+      "request_count": 2
+    }
   },
   "mistral_endpoint": {
     "endpoint_name": "burkimbia-mistral-translation",
     "model_type": "mistral",
-  "gpu_types": ["NVIDIA A40"],
-    "idle_timeout": 300,
+    "image": "docker.io/sawalle/translation-service:latest",
+    "gpu_types": ["NVIDIA A40"],
+    "idle_timeout": 600,
+    "env": {
+      "RUNPOD_INIT_TIMEOUT": 800
+    },
     "scaling": {
       "min_workers": 1,
-      "max_workers": 1
+      "max_workers": 2,
+      "queue_delay": 2,
+      "request_count": 2
     }
   },
   "nllb_endpoint": {
     "endpoint_name": "burkimbia-nllb-translation", 
     "model_type": "nllb",
-  "gpu_types": ["NVIDIA A40"],
-    "idle_timeout": 300,
+    "image": "docker.io/sawalle/translation-service:latest",
+    "gpu_types": ["NVIDIA A40"],
+    "idle_timeout": 600,
+    "env": {
+      "RUNPOD_INIT_TIMEOUT": 800
+    },
     "scaling": {
       "min_workers": 1,
-      "max_workers": 1
+      "max_workers": 2,
+      "queue_delay": 2,
+      "request_count": 2
     }
   },
   "unified_endpoint": {
     "endpoint_name": "burkimbia-unified-translation",
     "model_type": "unified",
-  "gpu_types": ["NVIDIA A40"], 
-    "idle_timeout": 300,
+    "image": "docker.io/sawalle/translation-service:latest",
+    "gpu_types": ["NVIDIA A40"], 
+    "idle_timeout": 600,
+    "env": {
+      "RUNPOD_INIT_TIMEOUT": 800
+    },
     "scaling": {
       "min_workers": 1,
-      "max_workers": 1
+      "max_workers": 4,
+      "queue_delay": 2,
+      "request_count": 2
     }
   }
 }

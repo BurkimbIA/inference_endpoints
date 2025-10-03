@@ -9,7 +9,7 @@ class MistralTranslator:
     Wrapper around a Mistral-Instruct-based model fine-tuned for French↔Mooré translation.
     """
 
-    def __init__(self, model_id: str, hf_token_env: str = "HF_TOKEN"):
+    def __init__(self, model_id: str = "burkimbia/BIA-MISTRAL-7B-SACHI", hf_token_env: str = "HF_TOKEN"):
         hf_token = os.environ.get(hf_token_env)
         if hf_token is None:
             raise ValueError(
@@ -115,15 +115,21 @@ def fix_tokenizer(tokenizer, new_lang):
 
 @auto_device
 class NLLBTranslator:
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str = "burkimbia/BIA-NLLB-600M-5E"):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(
-            device
-        )
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name,
+            cache_dir="/app/models",
+            token=os.environ.get("HF_TOKEN")
+        ).to(device)
         if torch.cuda.is_available():
             self.model.cuda()
-        self.tokenizer = NllbTokenizer.from_pretrained(model_name)
+        self.tokenizer = NllbTokenizer.from_pretrained(
+            model_name,
+            cache_dir="/app/models",
+            token=os.environ.get("HF_TOKEN")
+        )
         self.tokenizer = fix_tokenizer(self.tokenizer, "moor_Latn")
 
         self.preprocessor = TextPreprocessor()
